@@ -3,7 +3,7 @@ A simple 6502 emulator - work in progress. I've made this to refresh my memory o
 
 At the moment I'm working through enough of the Op Codes so that VIC20 ROMS work.
 
-Currently the memory map is 48K of RAM and 16K of ROM, as non of the hardware is emulated.
+Currently the memory map is 48K of RAM and 16K of ROM, as none of the hardware peripherals are currently emulated.
 
 ## Getting started
 
