@@ -14,4 +14,4 @@ From http://www.zimmers.net/anonftp/pub/cbm/firmware/computers/vic20/index.html 
 * kernal.901486-07.bin and save it as rom1.img
 * basic.901486-01.bin and save it as rom2.img
 
-The type ./em6502 to start emulating!
+Then type ./em6502 to start emulating!
