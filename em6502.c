@@ -373,7 +373,7 @@ void cpu_reset(void) {
 }
 
 int rom1_load() {
-   FILE *f = fopen("rom1.img","r");
+   FILE *f = fopen("rom1.img","rb");
    if(f == NULL) {
       fprintf(stderr, "Unable to open 'rom.img'\n");
       return 0;
@@ -388,7 +388,7 @@ int rom1_load() {
 }
 
 int rom2_load() {
-   FILE *f = fopen("rom2.img","r");
+   FILE *f = fopen("rom2.img","rb");
    if(f == NULL) {
       fprintf(stderr, "Unable to open 'rom.img'\n");
       return 0;
