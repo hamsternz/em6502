@@ -11,7 +11,7 @@ static uint8_t rom1[1024*8];
 static uint8_t rom2[1024*8];
 
 static uint8_t mem_read(uint16_t addr);
-static uint8_t mem_read_nolog(uint16_t addr);
+static uint8_t mem_fetch(uint16_t addr);
 static void mem_write(uint16_t addr, uint8_t data);
 /************************************
 * CPU state
@@ -44,8 +44,9 @@ static int32_t trace_num;
 #define TRACE_OP  1
 #define TRACE_RD  2
 #define TRACE_WR  4
+#define TRACE_FETCH  8
 
-//static int trace_level = TRACE_OP|TRACE_RD|TRACE_WR;
+//static int trace_level = TRACE_OP|TRACE_RD|TRACE_WR|TRACE_FETCH;
 //static int trace_level = TRACE_OP|TRACE_WR;
 //static int trace_level = TRACE_OP;
 static int trace_level = TRACE_OFF;
@@ -56,35 +57,35 @@ static int trace_level = TRACE_OFF;
 /********************************************************************************/
 
 static uint16_t addr_absolute(void) {
-  uint16_t rtn = mem_read(state.pc) | (mem_read(state.pc+1)<<8);
+  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc+1)<<8);
   state.pc+=2;
   trace_num = rtn;
   return rtn;
 }
 
 static uint16_t addr_absolute_x(void) {
-  uint16_t rtn = mem_read(state.pc) | (mem_read(state.pc+1)<<8);
+  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc+1)<<8);
   state.pc+=2;
   trace_num = rtn;
   return rtn+state.x;
 }
 
 static uint16_t addr_absolute_y(void) {
-  uint16_t rtn = mem_read(state.pc) | (mem_read(state.pc+1)<<8);
+  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc+1)<<8);
   state.pc+=2;
   trace_num = rtn;
   return rtn+state.y;
 }
 
 static uint16_t addr_zpg(void) {
-  uint16_t rtn = mem_read(state.pc);
+  uint16_t rtn = mem_fetch(state.pc);
   state.pc+=1;
   trace_num = rtn;
   return rtn;
 }
 
 static uint16_t addr_zpg_ind_y(void) {
-  uint16_t z = mem_read(state.pc);
+  uint16_t z = mem_fetch(state.pc);
   state.pc+=1;
   trace_num = z;
   uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
@@ -92,27 +93,28 @@ static uint16_t addr_zpg_ind_y(void) {
 }
 
 static uint8_t immediate(void) {
-  uint8_t rtn = mem_read(state.pc);
+  uint8_t rtn = mem_fetch(state.pc);
   state.pc++;
   trace_num = rtn;
   return rtn;
 }
 
 static int8_t relative(void) {
-  uint8_t rtn = mem_read(state.pc);
+  uint8_t rtn = mem_fetch(state.pc);
   state.pc++;
   trace_num = (int8_t)rtn;
   return (int8_t)rtn;
 }
 
 static uint8_t addr_zpg_x(void) {
-  uint8_t  z = mem_read(state.pc)+state.x;
+  uint8_t  z = mem_fetch(state.pc)+state.x;
   uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
   state.pc  +=1;
   trace_num = rtn;
   return rtn;
 }
 
+/******************************************************************************/
 static void op05(void) {  // AND zpg
   state.a |= mem_read(addr_zpg());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
@@ -527,34 +529,6 @@ static void (*dispatch[256])(void) = {
 /* E0 */    NULL, NULL, NULL, NULL, NULL, NULL, opE6, NULL, opE8, NULL, opEA, NULL, NULL, NULL, NULL, NULL,
 /* F0 */    opF0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 
-static void trace(char *msg) {
-  int i;
-  uint8_t inst;
-  if(!(trace_level & TRACE_OP))
-     return;
-
-  inst = mem_read_nolog(trace_addr);
-  printf("%04X: %02X ", trace_addr, inst);
-
-  for(i = 1; i < trace_len[inst]; i++) {
-    printf("%02X ", mem_read_nolog(trace_addr+i));
-  }
-
-  while(i < 4) {
-    printf("   ");
-    i++;
-  }
-#if 0
-  if(state.flags & FLAG_C) 
-    printf("C ");
-  else
-    printf("  ");
-#endif
-
-  printf(msg, trace_num);
-  printf("\n");
-}
-
 static void logger_16(char *message, uint16_t data) {
   printf("%s %04X\n", message, data);
 }
@@ -649,35 +623,6 @@ static void vic_write(uint16_t addr, uint8_t data) {
    assert(addr < 0x10);
 }
 
-static uint8_t mem_read(uint16_t addr) {
-  uint8_t rtn = 0;
-
-  if(addr < 0x4000) 
-    rtn = ram[addr];
-  else if(addr >= 0x9000 && addr< 0x9010)
-    rtn = vic_read(addr-0x9000);
-  else if(addr == 0xA008) {
-    logger_16("Expansion ROM probe at ",addr);
-  }
-  else if(addr < 0xC000) {
-    if(addr != 0x4000) {
-      logger_16("Read from unmapped address",addr);
-      trace_level |= TRACE_OP;
-    }
-    rtn = 0;
-  }
-  else if(addr < 0xE000) 
-    rtn =  rom1[addr-0xC000];
-  else if(addr <= 0xFFFF)
-    rtn =  rom2[addr-0xE000];
-  else {
-    logger_16("Read from unmapped address",addr);
-  }
-  if(trace_level & TRACE_RD)
-    logger_16_8("  Read ",addr, rtn);
-  return rtn;
-}
-
 static uint8_t mem_read_nolog(uint16_t addr) {
   uint8_t rtn;
 
@@ -698,6 +643,21 @@ static uint8_t mem_read_nolog(uint16_t addr) {
   return rtn;
 }
 
+static uint8_t mem_read(uint16_t addr) {
+  uint8_t rtn = 0;
+  rtn = mem_read_nolog(addr);
+  if(trace_level & TRACE_RD)
+    logger_16_8("  Read ",addr, rtn);
+  return rtn;
+}
+
+static uint8_t mem_fetch(uint16_t addr) {
+  uint8_t rtn = 0;
+  rtn = mem_read_nolog(addr);
+  if(trace_level & TRACE_FETCH)
+    logger_16_8("  Fetch",addr, rtn);
+  return rtn;
+}
 
 static void mem_write(uint16_t addr, uint8_t data) {
   if(trace_level & TRACE_WR)
@@ -717,8 +677,37 @@ static void mem_write(uint16_t addr, uint8_t data) {
 //  }
 }
 
+static void trace(char *msg) {
+  int i;
+  uint8_t inst;
+  if(!(trace_level & TRACE_OP))
+     return;
+
+  inst = mem_read_nolog(trace_addr);
+  printf("%04X: %02X ", trace_addr, inst);
+
+  for(i = 1; i < trace_len[inst]; i++) {
+    printf("%02X ", mem_read_nolog(trace_addr+i));
+  }
+
+  while(i < 4) {
+    printf("   ");
+    i++;
+  }
+#if 0
+  if(state.flags & FLAG_C) 
+    printf("C ");
+  else
+    printf("  ");
+#endif
+
+  printf(msg, trace_num);
+  printf("\n");
+}
+
+
 static int cpu_run(void) {
-   uint8_t inst = mem_read(state.pc);
+   uint8_t inst = mem_fetch(state.pc);
    trace_addr   = state.pc; 
    trace_opcode = inst;
    state.pc++;
