@@ -32,7 +32,7 @@ static struct cpu_state {
   uint16_t pc;
   uint32_t cycle;
 } state;
-
+static void cpu_dump(void);
 /**************************************
 * For tracing execution
 ***************************************/
@@ -41,16 +41,38 @@ static uint16_t trace_addr;
 static uint8_t trace_opcode;
 #define TRACE_OFF 0
 #define TRACE_OP  1
-#define TRACE_MEM 2
+#define TRACE_RD  2
+#define TRACE_WR  4
 
-//int trace_level = TRACE_OP|TRACE_MEM;
-static int trace_level = TRACE_OP;
-//static int trace_level = TRACE_OFF;
+//static int trace_level = TRACE_OP|TRACE_RD|TRACE_WR;
+//static int trace_level = TRACE_OP|TRACE_WR;
+//static int trace_level = TRACE_OP;
+static int trace_level = TRACE_OFF;
 
 
 /********************************************************************************/
 /*************** START OF ALL THE OPCODE IMPLEMENTATOINS ************************/
 /********************************************************************************/
+
+static void op05(void) {  // AND zpg
+  uint16_t z = mem_read(state.pc+1);
+  state.a |= mem_read(z);
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.pc    += 2;
+  state.cycle += 4;
+  if(trace_level & TRACE_OP)
+     trace("AND zeropage %02X", z);
+}
+
+static void op08(void) {  // PHP
+  mem_write(0x100+state.sp,   state.flags);
+  state.pc    += 1;
+  state.sp    -= 1; 
+  state.cycle += 3; 
+  if(trace_level & TRACE_OP)
+     trace("PHP", 0);
+}
 
 static void op18(void) {  // CLC
   state.flags &= ~FLAG_C;
@@ -70,7 +92,29 @@ static void op20(void) {  // JSR
   state.cycle += 6; 
   if(trace_level & TRACE_OP)
      trace("JSR #%04X", o);
-//  printf("Jumping to %04X from %04X\n",o, trace_addr);
+}
+
+static void op21(void) {  // AND (zpg, X)
+  uint8_t  z = mem_read(state.pc+1)+state.x;
+  uint16_t o = mem_read(z) | (mem_read(z+1)<<8);
+  state.a  &= mem_read(o);
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.pc    += 2;
+  state.cycle += 6;
+  if(trace_level & TRACE_OP)
+     trace("AND (zeropage %02X, X)", z);
+}
+
+static void op25(void) {  // AND zpg
+  uint16_t z = mem_read(state.pc+1);
+  state.a &= mem_read(z);
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.pc    += 2;
+  state.cycle += 4;
+  if(trace_level & TRACE_OP)
+     trace("AND zeropage %02X", z);
 }
 
 static void op4C(void) {  // JMP
@@ -86,8 +130,9 @@ static void op60(void) {  // RTS
   state.sp    += 2; 
   state.pc     = o+1;
   state.cycle += 6; 
-  if(trace_level & TRACE_OP)
+  if(trace_level & TRACE_OP) {
      trace("RTS", o);
+  }
 //  printf("Returning to %04X\n",o+1);
 }
 
@@ -145,13 +190,36 @@ static void op86(void) {  // STX zpg
      trace("STX zeropage %02X", z);
 }
 
+static void op88(void) {  // DEY
+  state.y     -= 1;
+  if((state.y) == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if((state.y) & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.pc    += 1;
+  state.cycle += 2; 
+  if(trace_level & TRACE_OP)
+     trace("DEY", 0);
+}
+
 static void op8A(void) {  // TXA
   state.a      = state.x;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.pc    += 1;
   state.cycle += 2; 
   if(trace_level & TRACE_OP)
      trace("TXA", 0);
 }
+
+static void op8C(void) {  // STY abs
+  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
+  mem_write(o, state.y);
+  state.pc    += 3;
+  state.cycle += 4;
+  if(trace_level & TRACE_OP)
+     trace("STY %04X", o);
+}
+
 
 static void op8D(void) {  // STA abs
   uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
@@ -245,6 +313,19 @@ static void opA2(void) {  // LDX #
      trace("LDX #%02X", o);
 }
 
+static void opA4(void) {  // LDY zeropage
+  uint8_t z = mem_read(state.pc+1);
+  uint8_t o = mem_read(z);
+  state.y      = o;
+  if(state.y == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.y &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.pc    += 2;
+  state.cycle += 3; 
+  if(trace_level & TRACE_OP)
+     trace("LDA zeropage %02X", z);
+}
+
 static void opA5(void) {  // LDA zeropage
   uint8_t z = mem_read(state.pc+1);
   uint8_t o = mem_read(z);
@@ -282,8 +363,8 @@ static void opA8(void) {  // TAY
 static void opA9(void) {  // LDA #
   uint8_t o = mem_read(state.pc+1);
   state.a      = o;
-  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
-  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.a == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
   state.pc    += 2;
   state.cycle += 2; 
@@ -293,10 +374,26 @@ static void opA9(void) {  // LDA #
 
 static void opAA(void) {  // TAX
   state.x      = state.a;
+  if(state.x == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.x &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.pc    += 1;
   state.cycle += 2; 
   if(trace_level & TRACE_OP)
      trace("TAX", 0);
+}
+
+static void opB0(void) {  // BCS rel
+  uint8_t o = mem_read(state.pc+1);
+  state.pc    += 2;
+  if(state.flags & FLAG_C) {
+    state.pc    += (signed char)o;
+    state.cycle += 3;  // TODO: +1 if boundary crossed
+  } else {
+    state.cycle += 2; 
+  }
+
+  if(trace_level & TRACE_OP)
+     trace("BCS %02i", (signed char)o);
 }
 
 static void opB1(void) {  // LDA (zpg), y
@@ -307,6 +404,17 @@ static void opB1(void) {  // LDA (zpg), y
   state.cycle += 6;
   if(trace_level & TRACE_OP)
      trace("LDA (zeropage %02X), Y", z);
+}
+
+static void opB9(void) {  // LDA abs, Y
+  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
+  state.a      = mem_read(o+state.y);
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.pc    += 3;
+  state.cycle += 4;  // TODO: +1 if boundary crossed
+  if(trace_level & TRACE_OP)
+     trace("LDA %04X, Y", o);
 }
 
 static void opBD(void) {  // LDA abs, X
@@ -320,10 +428,22 @@ static void opBD(void) {  // LDA abs, X
      trace("LDA %04X, X", o);
 }
 
+static void opC0(void) {  // CPY #
+  uint16_t o = mem_read(state.pc+1);
+  uint8_t  d = state.y - o;
+  state.pc    += 2;
+  state.cycle += 4;  // TODO: +1 if boundary crossed
+  if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.y >= o) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+ 
+  if(trace_level & TRACE_OP)
+     trace("CPY #%02X", o);
+}
+
 static void opC9(void) {  // CMP #
   uint8_t o = mem_read(state.pc+1);
   uint8_t d = state.a - o;
-  state.a      = o;
 
   if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
@@ -331,8 +451,9 @@ static void opC9(void) {  // CMP #
 
   state.pc    += 2;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
+  if(trace_level & TRACE_OP) {
      trace("CMP #%02X", o);
+  }
 }
 
 static void opCA(void) {  // DEX
@@ -364,14 +485,13 @@ static void opD1(void) {  // CMP (zpg), y
   uint16_t z = mem_read(state.pc+1);
   uint16_t o = mem_read(z) | (mem_read(z+1)<<8);
   uint8_t  m = mem_read(o+state.y);
-  uint8_t  d = state.a - mem_read(o+state.y);
+  uint8_t  d = state.a - m;
   state.pc    += 2;
   state.cycle += 6;
   
   if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   if(state.a >= m) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
-  state.a = d;
   
   if(trace_level & TRACE_OP)
      trace("CMP (zeropage %02X), Y", z);
@@ -460,7 +580,7 @@ static uint8_t trace_len[256] = {
 /* 50 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0,
 /* 60 */       1,    2,    0,    0,    0,    2,    2,    0,    1,    2,    1,    0,    1,    3,    3,    0,
 /* 70 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0,
-/* 80 */       0,    2,    0,    0,    2,    2,    2,    0,    1,    0,    1,    0,    1,    3,    3,    0,
+/* 80 */       0,    2,    0,    0,    2,    2,    2,    0,    1,    0,    1,    0,    3,    3,    3,    0,
 /* 90 */       2,    2,    0,    0,    2,    2,    2,    0,    1,    3,    1,    0,    0,    3,    0,    0,
 /* A0 */       2,    2,    2,    0,    2,    2,    2,    0,    1,    2,    1,    0,    1,    3,    3,    0,
 /* B0 */       2,    2,    0,    0,    2,    2,    2,    0,    1,    3,    1,    0,    1,    3,    3,    0,
@@ -471,19 +591,19 @@ static uint8_t trace_len[256] = {
 
 static void (*dispatch[256])(void) = {
 //           00    01    02    03    04    05    06    07    08    09    0A    0B    0C    0D    0E    0F
-/* 00 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 00 */    NULL, NULL, NULL, NULL, NULL, op05, NULL, NULL, op08, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 10 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 20 */    op20, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 20 */    op20, op21, NULL, NULL, NULL, op25, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 30 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 40 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op4C, NULL, NULL, NULL,
 /* 50 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 60 */    op60, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op6A, NULL, NULL, NULL, NULL, NULL,
 /* 70 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op78, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 80 */    NULL, NULL, NULL, NULL, op84, op85, op86, NULL, NULL, NULL, op8A, NULL, NULL, op8D, op8E, NULL,
+/* 80 */    NULL, NULL, NULL, NULL, op84, op85, op86, NULL, op88, NULL, op8A, NULL, op8C, op8D, op8E, NULL,
 /* 90 */    op90, op91, NULL, NULL, NULL, op95, NULL, NULL, NULL, NULL, op9A, NULL, NULL, op9D, NULL, NULL,
-/* A0 */    opA0, NULL, opA2, NULL, NULL, opA5, opA6, NULL, opA8, opA9, opAA, NULL, NULL, NULL, NULL, NULL,
-/* B0 */    NULL, opB1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opBD, NULL, NULL,
-/* C0 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opC9, opCA, NULL, NULL, NULL, NULL, NULL,
+/* A0 */    opA0, NULL, opA2, NULL, opA4, opA5, opA6, NULL, opA8, opA9, opAA, NULL, NULL, NULL, NULL, NULL,
+/* B0 */    opB0, opB1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opB9, NULL, NULL, NULL, opBD, NULL, NULL,
+/* C0 */    opC0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opC9, opCA, NULL, NULL, NULL, NULL, NULL,
 /* D0 */    opD0, opD1, NULL, NULL, NULL, NULL, NULL, NULL, opD8, NULL, NULL, NULL, NULL, opDD, NULL, NULL,
 /* E0 */    NULL, NULL, NULL, NULL, NULL, NULL, opE6, NULL, opE8, NULL, opEA, NULL, NULL, NULL, NULL, NULL,
 /* F0 */    opF0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
@@ -497,10 +617,16 @@ static void trace(char *msg, int32_t op) {
   for(i = 1; i < trace_len[inst]; i++) {
     printf("%02X ", mem_read_nolog(trace_addr+i));
   }
+
   while(i < 4) {
     printf("   ");
     i++;
   }
+  if(state.flags & FLAG_C) 
+    printf("C ");
+  else
+    printf("  ");
+
   printf(msg, op);
   printf("\n");
 }
@@ -517,7 +643,7 @@ static void logger_16_8(char *message, uint16_t data16, uint8_t data8) {
   printf("%s %04X %02X\n", message, data16, data8);
 }
 
-static void dump(void) {
+static void cpu_dump(void) {
    printf("\n");
    printf("Fault at cycle %i\n",state.cycle);
    printf("PC:    %04x\n",state.pc);
@@ -607,11 +733,13 @@ static uint8_t mem_read(uint16_t addr) {
   else if(addr >= 0x9000 && addr< 0x9010)
     rtn = vic_read(addr-0x9000);
   else if(addr == 0xA008) {
-    logger_16("Expansion ROM probe at %04X",addr);
+    logger_16("Expansion ROM probe at ",addr);
   }
   else if(addr < 0xC000) {
-    logger_16("Read from unmapped address",addr);
-    trace_level |= TRACE_OP;
+    if(addr != 0x4000) {
+      logger_16("Read from unmapped address",addr);
+      trace_level |= TRACE_OP;
+    }
     rtn = 0;
   }
   else if(addr < 0xE000) 
@@ -621,7 +749,7 @@ static uint8_t mem_read(uint16_t addr) {
   else {
     logger_16("Read from unmapped address",addr);
   }
-  if(trace_level & TRACE_MEM)
+  if(trace_level & TRACE_RD)
     logger_16_8("  Read ",addr, rtn);
   return rtn;
 }
@@ -648,7 +776,7 @@ static uint8_t mem_read_nolog(uint16_t addr) {
 
 
 static void mem_write(uint16_t addr, uint8_t data) {
-  if(trace_level & TRACE_MEM)
+  if(trace_level & TRACE_WR)
     logger_16_8("  Write", addr, data);
 
   if(addr < 0x4000)  {
@@ -659,8 +787,10 @@ static void mem_write(uint16_t addr, uint8_t data) {
     vic_write(addr-0x9000, data);
     return;
   }
-  logger_16_8("Write to unmapped address", addr, data);
-  trace_level |= TRACE_OP;
+  if(addr != 0x4000) {
+    logger_16_8("Write to unmapped address", addr, data);
+    trace_level |= TRACE_OP;
+  }
 }
 
 static int cpu_run(void) {
@@ -669,7 +799,7 @@ static int cpu_run(void) {
    trace_opcode = inst;
    if(dispatch[inst]==0) {
       logger_16_8("Unknown opcode at address",state.pc, inst);
-      dump();
+      cpu_dump();
       return 0;
    }
    dispatch[inst]();
