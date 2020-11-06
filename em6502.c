@@ -36,9 +36,10 @@ static void cpu_dump(void);
 /**************************************
 * For tracing execution
 ***************************************/
-static void trace(char *msg, int32_t op);
+static void trace(char *msg);
 static uint16_t trace_addr;
 static uint8_t trace_opcode;
+static int32_t trace_num;
 #define TRACE_OFF 0
 #define TRACE_OP  1
 #define TRACE_RD  2
@@ -54,75 +55,116 @@ static int trace_level = TRACE_OFF;
 /*************** START OF ALL THE OPCODE IMPLEMENTATOINS ************************/
 /********************************************************************************/
 
+static uint16_t addr_absolute(void) {
+  uint16_t rtn = mem_read(state.pc) | (mem_read(state.pc+1)<<8);
+  state.pc+=2;
+  trace_num = rtn;
+  return rtn;
+}
+
+static uint16_t addr_absolute_x(void) {
+  uint16_t rtn = mem_read(state.pc) | (mem_read(state.pc+1)<<8);
+  state.pc+=2;
+  trace_num = rtn;
+  return rtn+state.x;
+}
+
+static uint16_t addr_absolute_y(void) {
+  uint16_t rtn = mem_read(state.pc) | (mem_read(state.pc+1)<<8);
+  state.pc+=2;
+  trace_num = rtn;
+  return rtn+state.y;
+}
+
+static uint16_t addr_zpg(void) {
+  uint16_t rtn = mem_read(state.pc);
+  state.pc+=1;
+  trace_num = rtn;
+  return rtn;
+}
+
+static uint16_t addr_zpg_ind_y(void) {
+  uint16_t z = mem_read(state.pc);
+  state.pc+=1;
+  trace_num = z;
+  uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
+  return rtn+state.y;
+}
+
+static uint8_t immediate(void) {
+  uint8_t rtn = mem_read(state.pc);
+  state.pc++;
+  trace_num = rtn;
+  return rtn;
+}
+
+static int8_t relative(void) {
+  uint8_t rtn = mem_read(state.pc);
+  state.pc++;
+  trace_num = (int8_t)rtn;
+  return (int8_t)rtn;
+}
+
+static uint8_t addr_zpg_x(void) {
+  uint8_t  z = mem_read(state.pc)+state.x;
+  uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
+  state.pc  +=1;
+  trace_num = rtn;
+  return rtn;
+}
+
 static void op05(void) {  // AND zpg
-  uint16_t z = mem_read(state.pc+1);
-  state.a |= mem_read(z);
+  state.a |= mem_read(addr_zpg());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 2;
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("AND zeropage %02X", z);
+  trace("AND zeropage %02X");
 }
 
 static void op08(void) {  // PHP
   mem_write(0x100+state.sp,   state.flags);
-  state.pc    += 1;
   state.sp    -= 1; 
   state.cycle += 3; 
-  if(trace_level & TRACE_OP)
-     trace("PHP", 0);
+  trace("PHP");
 }
 
 static void op18(void) {  // CLC
   state.flags &= ~FLAG_C;
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("CLC", 0);
+  trace("CLC");
 }
 
 static void op20(void) {  // JSR
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  state.pc    += 2;
-  mem_write(0x100+state.sp,   state.pc>>8);
-  mem_write(0x100+state.sp-1, state.pc&0xFF);
+  uint16_t a = addr_absolute();
+  mem_write(0x100+state.sp,   (state.pc-1)>>8);
+  mem_write(0x100+state.sp-1, (state.pc-1)&0xFF);
   state.sp    -= 2; 
-  state.pc     = o;
+  state.pc     = a;
   state.cycle += 6; 
-  if(trace_level & TRACE_OP)
-     trace("JSR #%04X", o);
+  trace("JSR #%04X");
 }
 
 static void op21(void) {  // AND (zpg, X)
-  uint8_t  z = mem_read(state.pc+1)+state.x;
-  uint16_t o = mem_read(z) | (mem_read(z+1)<<8);
-  state.a  &= mem_read(o);
+  state.a  &= mem_read(addr_zpg_x());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 2;
   state.cycle += 6;
-  if(trace_level & TRACE_OP)
-     trace("AND (zeropage %02X, X)", z);
+  trace("AND (zeropage %02X, X)");
 }
 
 static void op25(void) {  // AND zpg
-  uint16_t z = mem_read(state.pc+1);
-  state.a &= mem_read(z);
+  state.a &= mem_read(addr_zpg());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 2;
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("AND zeropage %02X", z);
+  trace("AND zeropage %02X");
 }
 
 static void op4C(void) {  // JMP
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
+  uint16_t o = addr_absolute();
   state.pc     = o;
   state.cycle += 3; 
-  if(trace_level & TRACE_OP)
-     trace("JMP #%04X", o);
+  trace("JMP #%04X");
 }
 
 static void op60(void) {  // RTS
@@ -130,10 +172,7 @@ static void op60(void) {  // RTS
   state.sp    += 2; 
   state.pc     = o+1;
   state.cycle += 6; 
-  if(trace_level & TRACE_OP) {
-     trace("RTS", o);
-  }
-//  printf("Returning to %04X\n",o+1);
+  trace("RTS");
 }
 
 static void op6A(void) {  // ROR A
@@ -149,421 +188,301 @@ static void op6A(void) {  // ROR A
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("ROR A", 0);
+  trace("ROR A");
 }
 
 static void op78(void) {  // SEI
   state.flags |= FLAG_I;
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("SEI", 0);
+  trace("SEI");
 }
 
 static void op84(void) {  // STY zpg
-  uint16_t z = mem_read(state.pc+1);
-  mem_write(z, state.y);
-  state.pc    += 2;
+  mem_write(addr_zpg(), state.y);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STY zeropage %02X", z);
+  trace("STY zeropage %02X");
 }
 
 static void op85(void) {  // STA zpg
-  uint16_t z = mem_read(state.pc+1);
-  mem_write(z, state.a);
-  state.pc    += 2;
+  mem_write(addr_zpg(), state.a);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STA zeropage %02X", z);
+  trace("STA zeropage %02X");
 }
 
 static void op86(void) {  // STX zpg
-  uint16_t z = mem_read(state.pc+1);
-  mem_write(z, state.x);
-  state.pc    += 2;
+  mem_write(addr_zpg(), state.x);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STX zeropage %02X", z);
+  trace("STX zeropage %02X");
 }
 
 static void op88(void) {  // DEY
   state.y     -= 1;
   if((state.y) == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if((state.y) & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("DEY", 0);
+  trace("DEY");
 }
 
 static void op8A(void) {  // TXA
   state.a      = state.x;
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("TXA", 0);
+  trace("TXA");
 }
 
 static void op8C(void) {  // STY abs
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  mem_write(o, state.y);
-  state.pc    += 3;
+  mem_write(addr_absolute(), state.y);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STY %04X", o);
+  trace("STY %04X");
 }
 
 
 static void op8D(void) {  // STA abs
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  mem_write(o, state.a);
-  state.pc    += 3;
+  mem_write(addr_absolute(), state.a);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STA %04X", o);
+  trace("STA %04X");
 }
 
 static void op8E(void) {  // STX abs
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  mem_write(o, state.x);
-  state.pc    += 3;
+  mem_write(addr_absolute(), state.x);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STX %04X", o);
+  trace("STX %04X");
 }
 
 static void op90(void) {  // BCC rel
-  uint8_t o = mem_read(state.pc+1);
-  state.pc    += 2;
+  int8_t offset = relative();
   if(state.flags & FLAG_C) {
     state.cycle += 2; 
   } else {
-    state.pc    += (signed char)o;
+    state.pc    += offset;
     state.cycle += 3;  // TODO: +1 if boundary crossed
   }
-
-  if(trace_level & TRACE_OP)
-     trace("BCC %02i", (signed char)o);
+  trace("BCC %02i");
 }
 
 static void op91(void) {  // STA (zpg), y
-  uint16_t z = mem_read(state.pc+1);
-  uint16_t o = mem_read(z) | (mem_read(z+1)<<8);
-  mem_write(o+state.y,state.a);
-  state.pc    += 2;
+  mem_write(addr_zpg_ind_y(),state.a);
   state.cycle += 6;
-  if(trace_level & TRACE_OP)
-     trace("STA (zeropage %02X), Y", z);
+  trace("STA (zeropage %02X), Y");
 }
 
 static void op95(void) {  // STA zpg, X
-  uint16_t z = mem_read(state.pc+1);
-  uint16_t o = mem_read(z) | (mem_read(z+1)<<8);
-  mem_write(o+state.x,state.a);
-  state.pc    += 2;
+  mem_write(addr_zpg_x(),state.a);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STA zeropage %02X, X", z);
+  trace("STA zeropage %02X, X");
 }
 
 
 static void op9A(void) {  // TXS
   state.sp     = state.x;
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("TXS", 0);
+  trace("TXS");
 }
 
 static void op9D(void) {  // STA abs, X
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  mem_write(o+state.x, state.a);
-  state.pc    += 3;
+  mem_write(addr_absolute(), state.a);
   state.cycle += 4;
-  if(trace_level & TRACE_OP)
-     trace("STA %04X, X", o);
+  trace("STA %04X, X");
 }
 
 static void opA0(void) {  // LDY #
-  uint8_t o = mem_read(state.pc+1);
-  state.y      = o;
+  state.y      = immediate();
   if(state.y == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.y &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 2;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("LDY #%02X", o);
+  trace("LDY #%02X");
 }
 
 static void opA2(void) {  // LDX #
-  uint8_t o = mem_read(state.pc+1);
-  state.x      = o;
+  state.x      = immediate();
   if(state.x == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.x &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 2;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("LDX #%02X", o);
+  trace("LDX #%02X");
 }
 
 static void opA4(void) {  // LDY zeropage
-  uint8_t z = mem_read(state.pc+1);
-  uint8_t o = mem_read(z);
-  state.y      = o;
+  state.y = mem_read(addr_zpg());
   if(state.y == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.y &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-
-  state.pc    += 2;
   state.cycle += 3; 
-  if(trace_level & TRACE_OP)
-     trace("LDA zeropage %02X", z);
+  trace("LDA zeropage %02X");
 }
 
 static void opA5(void) {  // LDA zeropage
-  uint8_t z = mem_read(state.pc+1);
-  uint8_t o = mem_read(z);
-  state.a      = o;
+  state.a = mem_read(addr_zpg());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
-  state.pc    += 2;
   state.cycle += 3; 
-  if(trace_level & TRACE_OP)
-     trace("LDA zeropage %02X", z);
+  trace("LDA zeropage %02X");
 }
 
 static void opA6(void) {  // LDX zeropage
-  uint8_t z = mem_read(state.pc+1);
-  uint8_t o = mem_read(z);
-  state.x      = o;
+  state.x = mem_read(addr_zpg());
   if(state.x == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.x &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-
-  state.pc    += 2;
   state.cycle += 3; 
-  if(trace_level & TRACE_OP)
-     trace("LDX zeropage %02X", z);
+  trace("LDX zeropage %02X");
 }
 
 static void opA8(void) {  // TAY
   state.y      = state.a;
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("TAY", 0);
+  trace("TAY");
 }
 
 static void opA9(void) {  // LDA #
-  uint8_t o = mem_read(state.pc+1);
-  state.a      = o;
+  state.a      = immediate();
   if(state.a == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-
-  state.pc    += 2;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("LDA #%02X", o);
+  trace("LDA #%02X");
 }
 
 static void opAA(void) {  // TAX
   state.x      = state.a;
   if(state.x == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.x &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("TAX", 0);
+  trace("TAX");
 }
 
 static void opB0(void) {  // BCS rel
-  uint8_t o = mem_read(state.pc+1);
-  state.pc    += 2;
+  int8_t offset = relative();
   if(state.flags & FLAG_C) {
-    state.pc    += (signed char)o;
+    state.pc    += offset;
     state.cycle += 3;  // TODO: +1 if boundary crossed
   } else {
     state.cycle += 2; 
   }
-
-  if(trace_level & TRACE_OP)
-     trace("BCS %02i", (signed char)o);
+  trace("BCS %02i");
 }
 
 static void opB1(void) {  // LDA (zpg), y
-  uint16_t z = mem_read(state.pc+1);
-  uint16_t o = mem_read(z) | (mem_read(z+1)<<8);
-  state.a = mem_read(o+state.y);
-  state.pc    += 2;
+  state.a = mem_read(addr_zpg_ind_y());
   state.cycle += 6;
-  if(trace_level & TRACE_OP)
-     trace("LDA (zeropage %02X), Y", z);
+  trace("LDA (zeropage %02X), Y");
 }
 
 static void opB9(void) {  // LDA abs, Y
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  state.a      = mem_read(o+state.y);
+  state.a      = mem_read(addr_absolute_y());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 3;
   state.cycle += 4;  // TODO: +1 if boundary crossed
-  if(trace_level & TRACE_OP)
-     trace("LDA %04X, Y", o);
+  trace("LDA %04X, Y");
 }
 
 static void opBD(void) {  // LDA abs, X
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  state.a      = mem_read(o+state.x);
+  state.a      = mem_read(addr_absolute_x());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.pc    += 3;
   state.cycle += 4;  // TODO: +1 if boundary crossed
-  if(trace_level & TRACE_OP)
-     trace("LDA %04X, X", o);
+  trace("LDA %04X, X");
 }
 
 static void opC0(void) {  // CPY #
-  uint16_t o = mem_read(state.pc+1);
-  uint8_t  d = state.y - o;
-  state.pc    += 2;
+  uint16_t val = immediate();
+  uint8_t  d = state.y - val;
   state.cycle += 4;  // TODO: +1 if boundary crossed
-  if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
-  if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  if(state.y >= o) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
- 
-  if(trace_level & TRACE_OP)
-     trace("CPY #%02X", o);
+  if(d == 0)         state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.y >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  trace("CPY #%02X");
 }
 
 static void opC9(void) {  // CMP #
-  uint8_t o = mem_read(state.pc+1);
-  uint8_t d = state.a - o;
-
-  if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
-  if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  if(state.a >= o) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
-
-  state.pc    += 2;
+  uint8_t val = immediate();
+  uint8_t d = state.a - val;
+  if(d == 0)         state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.a >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP) {
-     trace("CMP #%02X", o);
-  }
+  trace("CMP #%02X");
 }
 
 static void opCA(void) {  // DEX
   state.x     -= 1;
   if((state.x) == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if((state.x) & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("DEX", 0);
+  trace("DEX");
 }
 
 static void opD0(void) {  // BNE rel
-  uint8_t o = mem_read(state.pc+1);
-  state.pc    += 2;
+  int8_t offset = relative();
   if(state.flags & FLAG_Z) {
     state.cycle += 2; 
   } else {
-    state.pc    += (signed char)o;
+    state.pc    += offset;
     state.cycle += 3;  // TODO: +1 if boundary crossed
   }
-
-  if(trace_level & TRACE_OP)
-     trace("BNE %02i", (signed char)o);
+  trace("BNE %02i");
 }
 
 static void opD1(void) {  // CMP (zpg), y
-  uint16_t z = mem_read(state.pc+1);
-  uint16_t o = mem_read(z) | (mem_read(z+1)<<8);
-  uint8_t  m = mem_read(o+state.y);
+  uint8_t  m = mem_read(addr_zpg_ind_y());
   uint8_t  d = state.a - m;
-  state.pc    += 2;
   state.cycle += 6;
   
   if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   if(state.a >= m) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
   
-  if(trace_level & TRACE_OP)
-     trace("CMP (zeropage %02X), Y", z);
+  trace("CMP (zeropage %02X), Y");
 }
 
 static void opD8(void) {  // CLD
   state.flags &= ~FLAG_D;
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("CLD", 0);
+  trace("CLD");
 }
 
 static void opDD(void) {  // CMP abs,X
-  uint16_t o = mem_read(state.pc+1) | (mem_read(state.pc+2)<<8);
-  uint8_t  m = mem_read(o+state.x);
-  uint8_t  d = state.a - m;
-  state.pc    += 3;
+  uint8_t val = mem_read(addr_absolute_x());
+  uint8_t d = state.a - val;
   state.cycle += 4;  // TODO: +1 if boundary crossed
-  if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
-  if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  if(state.a >= m) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
-  state.a = d;
- 
-  if(trace_level & TRACE_OP)
-     trace("CMP %04X, X", o);
+  if(d == 0)         state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.a >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  trace("CMP %04X, X");
 }
 
 static void opE8(void) {  // INX
   state.x     += 1;
   if((state.x) == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if((state.x) & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-
-  state.pc    += 1;
   state.cycle += 2; 
-  if(trace_level & TRACE_OP)
-     trace("INX", 0);
+  trace("INX");
 }
 
 static void opE6(void) {  // INC zeropage
-  uint8_t z = mem_read(state.pc+1);
+  uint8_t z = addr_zpg();
   uint8_t t = mem_read(z);
   t++;
   mem_write(z,t);
   if(t == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-
-  state.pc    += 2;
   state.cycle += 5; 
-  if(trace_level & TRACE_OP)
-     trace("INC zeropage %02X", z);
+  trace("INC zeropage %02X");
 }
 
 static void opEA(void) {  // NOP
-  state.pc    += 1;
   state.cycle += 2;
-  if(trace_level & TRACE_OP)
-     trace("NOP",0);
+  trace("NOP");
 }
 
 static void opF0(void) {  // BEQ rel
-  uint8_t o = mem_read(state.pc+1);
-  state.pc    += 2;
+  int8_t offset = relative();
   if(state.flags & FLAG_Z) {
-    state.pc    += (signed char)o;
+    state.pc    += offset;
     state.cycle += 3;  // TODO: +1 if boundary crossed
   } else {
     state.cycle += 2; 
   }
-
-  if(trace_level & TRACE_OP)
-     trace("BEQ %02i", (signed char)o);
+  trace("BEQ %02i");
 }
 
 /********************************************************************************/
@@ -608,9 +527,12 @@ static void (*dispatch[256])(void) = {
 /* E0 */    NULL, NULL, NULL, NULL, NULL, NULL, opE6, NULL, opE8, NULL, opEA, NULL, NULL, NULL, NULL, NULL,
 /* F0 */    opF0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 
-static void trace(char *msg, int32_t op) {
+static void trace(char *msg) {
   int i;
   uint8_t inst;
+  if(!(trace_level & TRACE_OP))
+     return;
+
   inst = mem_read_nolog(trace_addr);
   printf("%04X: %02X ", trace_addr, inst);
 
@@ -622,12 +544,14 @@ static void trace(char *msg, int32_t op) {
     printf("   ");
     i++;
   }
+#if 0
   if(state.flags & FLAG_C) 
     printf("C ");
   else
     printf("  ");
+#endif
 
-  printf(msg, op);
+  printf(msg, trace_num);
   printf("\n");
 }
 
@@ -787,16 +711,17 @@ static void mem_write(uint16_t addr, uint8_t data) {
     vic_write(addr-0x9000, data);
     return;
   }
-  if(addr != 0x4000) {
+//  if(addr != 0x4000) {
     logger_16_8("Write to unmapped address", addr, data);
     trace_level |= TRACE_OP;
-  }
+//  }
 }
 
 static int cpu_run(void) {
    uint8_t inst = mem_read(state.pc);
    trace_addr   = state.pc; 
    trace_opcode = inst;
+   state.pc++;
    if(dispatch[inst]==0) {
       logger_16_8("Unknown opcode at address",state.pc, inst);
       cpu_dump();
@@ -807,7 +732,7 @@ static int cpu_run(void) {
 }
 
 static void cpu_reset(void) {
-   trace("RESET triggerd",0);
+   trace("RESET triggerd");
    state.sp     = 0xFD;   
    state.pc     = mem_read(0xFFFC);
    state.pc    |= mem_read(0xFFFD)<<8;   
