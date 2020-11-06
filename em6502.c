@@ -57,36 +57,31 @@ static int trace_level = TRACE_OFF;
 /********************************************************************************/
 
 static uint16_t addr_absolute(void) {
-  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc+1)<<8);
-  state.pc+=2;
+  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc)<<8);
   trace_num = rtn;
   return rtn;
 }
 
 static uint16_t addr_absolute_x(void) {
-  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc+1)<<8);
-  state.pc+=2;
+  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc)<<8);
   trace_num = rtn;
   return rtn+state.x;
 }
 
 static uint16_t addr_absolute_y(void) {
-  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc+1)<<8);
-  state.pc+=2;
+  uint16_t rtn = mem_fetch(state.pc) | (mem_fetch(state.pc)<<8);
   trace_num = rtn;
   return rtn+state.y;
 }
 
 static uint16_t addr_zpg(void) {
   uint16_t rtn = mem_fetch(state.pc);
-  state.pc+=1;
   trace_num = rtn;
   return rtn;
 }
 
 static uint16_t addr_zpg_ind_y(void) {
   uint16_t z = mem_fetch(state.pc);
-  state.pc+=1;
   trace_num = z;
   uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
   return rtn+state.y;
@@ -94,14 +89,12 @@ static uint16_t addr_zpg_ind_y(void) {
 
 static uint8_t immediate(void) {
   uint8_t rtn = mem_fetch(state.pc);
-  state.pc++;
   trace_num = rtn;
   return rtn;
 }
 
 static int8_t relative(void) {
   uint8_t rtn = mem_fetch(state.pc);
-  state.pc++;
   trace_num = (int8_t)rtn;
   return (int8_t)rtn;
 }
@@ -109,7 +102,6 @@ static int8_t relative(void) {
 static uint8_t addr_zpg_x(void) {
   uint8_t  z = mem_fetch(state.pc)+state.x;
   uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
-  state.pc  +=1;
   trace_num = rtn;
   return rtn;
 }
@@ -654,6 +646,7 @@ static uint8_t mem_read(uint16_t addr) {
 static uint8_t mem_fetch(uint16_t addr) {
   uint8_t rtn = 0;
   rtn = mem_read_nolog(addr);
+  state.pc++;
   if(trace_level & TRACE_FETCH)
     logger_16_8("  Fetch",addr, rtn);
   return rtn;
@@ -707,12 +700,12 @@ static void trace(char *msg) {
 
 
 static int cpu_run(void) {
-   uint8_t inst = mem_fetch(state.pc);
+   uint8_t inst;
    trace_addr   = state.pc; 
+   inst         = mem_fetch(state.pc);
    trace_opcode = inst;
-   state.pc++;
    if(dispatch[inst]==0) {
-      logger_16_8("Unknown opcode at address",state.pc, inst);
+      logger_16_8("Unknown opcode at address",trace_addr, inst);
       cpu_dump();
       return 0;
    }
