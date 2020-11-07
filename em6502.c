@@ -122,6 +122,40 @@ static void op08(void) {  // PHP
   trace("PHP");
 }
 
+static void op09(void) {  // AND #
+  state.a |= immediate();
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 4;
+  trace("AND #%02X");
+}
+
+static void op0A(void) {  // ASL A
+  uint16_t t = state.a;
+  if(t&1) { 
+    state.flags |= FLAG_C;
+  } else {
+    state.flags &= ~FLAG_C;
+  }
+  state.a = (t>>1) | (t&0x80);
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.cycle += 2; 
+  trace("ASL A");
+}
+
+static void op10(void) {  // BPL rel
+  int8_t offset = relative();
+  if(state.flags & FLAG_N) {
+    state.cycle += 2; 
+  } else {
+    state.pc    += offset;
+    state.cycle += 3;  // TODO: +1 if boundary crossed
+  }
+  trace("BPL %02i");
+}
+
 static void op18(void) {  // CLC
   state.flags &= ~FLAG_C;
   state.cycle += 2; 
@@ -154,6 +188,25 @@ static void op25(void) {  // AND zpg
   trace("AND zeropage %02X");
 }
 
+static void op29(void) {  // AND #
+  state.a &= immediate();
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 4;
+  trace("AND #%02X");
+}
+
+static void op30(void) {  // BMI rel
+  int8_t offset = relative();
+  if(state.flags & FLAG_N) {
+    state.pc    += offset;
+    state.cycle += 3;  // TODO: +1 if boundary crossed
+  } else {
+    state.cycle += 2; 
+  }
+  trace("BMI %02i");
+}
+
 static void op4C(void) {  // JMP
   uint16_t o = addr_absolute();
   state.pc     = o;
@@ -167,6 +220,18 @@ static void op60(void) {  // RTS
   state.pc     = o+1;
   state.cycle += 6; 
   trace("RTS");
+}
+
+static void op69(void) {  // ADC #
+  uint16_t t = state.a;
+  t += immediate();
+  t += (state.flags & FLAG_C ? 1 : 0);
+  state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  state.cycle += 4;   // TODO Decimal mode
+  trace("ADC #%02X");
 }
 
 static void op6A(void) {  // ROR A
@@ -262,10 +327,22 @@ static void op91(void) {  // STA (zpg), y
   trace("STA (zeropage %02X), Y");
 }
 
+static void op94(void) {  // STY zpg, X
+  mem_write(addr_zpg_x(),state.y);
+  state.cycle += 4;
+  trace("STY zeropage %02X, X");
+}
+
 static void op95(void) {  // STA zpg, X
   mem_write(addr_zpg_x(),state.a);
   state.cycle += 4;
   trace("STA zeropage %02X, X");
+}
+
+static void op99(void) {  // STA abs, Y
+  mem_write(addr_absolute_y(), state.a);
+  state.cycle += 4;  // TODO: +1 if boundary crossed
+  trace("STA %04X, Y");
 }
 
 
@@ -344,6 +421,14 @@ static void opAA(void) {  // TAX
   trace("TAX");
 }
 
+static void opAD(void) {  // LDA abs
+  state.a      = addr_absolute();
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 2; 
+  trace("LDA #%04X");
+}
+
 static void opB0(void) {  // BCS rel
   int8_t offset = relative();
   if(state.flags & FLAG_C) {
@@ -385,6 +470,14 @@ static void opC0(void) {  // CPY #
   if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   if(state.y >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
   trace("CPY #%02X");
+}
+
+static void opC8(void) {  // INY
+  state.y     += 1;
+  if((state.y) == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if((state.y) & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 2; 
+  trace("INX");
 }
 
 static void opC9(void) {  // CMP #
@@ -443,6 +536,17 @@ static void opDD(void) {  // CMP abs,X
   if(state.a >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
   trace("CMP %04X, X");
 }
+
+static void opE0(void) {  // CPX #
+  uint16_t val = immediate();
+  uint8_t  d = state.x - val;
+  state.cycle += 4;  // TODO: +1 if boundary crossed
+  if(d == 0)         state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.x >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  trace("CPX #%02X");
+}
+
 
 static void opE8(void) {  // INX
   state.x     += 1;
@@ -504,26 +608,22 @@ static uint8_t trace_len[256] = {
 
 static void (*dispatch[256])(void) = {
 //           00    01    02    03    04    05    06    07    08    09    0A    0B    0C    0D    0E    0F
-/* 00 */    NULL, NULL, NULL, NULL, NULL, op05, NULL, NULL, op08, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 10 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 20 */    op20, op21, NULL, NULL, NULL, op25, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 30 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 00 */    NULL, NULL, NULL, NULL, NULL, op05, NULL, NULL, op08, op09, op0A, NULL, NULL, NULL, NULL, NULL,
+/* 10 */    op10, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 20 */    op20, op21, NULL, NULL, NULL, op25, NULL, NULL, NULL, op29, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 30 */    op30, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 40 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op4C, NULL, NULL, NULL,
 /* 50 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 60 */    op60, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op6A, NULL, NULL, NULL, NULL, NULL,
+/* 60 */    op60, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op69, op6A, NULL, NULL, NULL, NULL, NULL,
 /* 70 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op78, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 80 */    NULL, NULL, NULL, NULL, op84, op85, op86, NULL, op88, NULL, op8A, NULL, op8C, op8D, op8E, NULL,
-/* 90 */    op90, op91, NULL, NULL, NULL, op95, NULL, NULL, NULL, NULL, op9A, NULL, NULL, op9D, NULL, NULL,
-/* A0 */    opA0, NULL, opA2, NULL, opA4, opA5, opA6, NULL, opA8, opA9, opAA, NULL, NULL, NULL, NULL, NULL,
+/* 90 */    op90, op91, NULL, NULL, op94, op95, NULL, NULL, NULL, op99, op9A, NULL, NULL, op9D, NULL, NULL,
+/* A0 */    opA0, NULL, opA2, NULL, opA4, opA5, opA6, NULL, opA8, opA9, opAA, NULL, NULL, opAD, NULL, NULL,
 /* B0 */    opB0, opB1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opB9, NULL, NULL, NULL, opBD, NULL, NULL,
-/* C0 */    opC0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opC9, opCA, NULL, NULL, NULL, NULL, NULL,
+/* C0 */    opC0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opC8, opC9, opCA, NULL, NULL, NULL, NULL, NULL,
 /* D0 */    opD0, opD1, NULL, NULL, NULL, NULL, NULL, NULL, opD8, NULL, NULL, NULL, NULL, opDD, NULL, NULL,
-/* E0 */    NULL, NULL, NULL, NULL, NULL, NULL, opE6, NULL, opE8, NULL, opEA, NULL, NULL, NULL, NULL, NULL,
+/* E0 */    opE0, NULL, NULL, NULL, NULL, NULL, opE6, NULL, opE8, NULL, opEA, NULL, NULL, NULL, NULL, NULL,
 /* F0 */    opF0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
-
-static void logger_16(char *message, uint16_t data) {
-  printf("%s %04X\n", message, data);
-}
 
 static void logger_8(char *message, uint8_t data) {
   printf("%s %02X\n", message, data);
@@ -615,6 +715,25 @@ static void vic_write(uint16_t addr, uint8_t data) {
    assert(addr < 0x10);
 }
 
+/*****************************************************************/
+static uint8_t via1_read(uint16_t addr) {
+   assert(addr < 0x20);
+   return 0;
+}
+static void via1_write(uint16_t addr, uint8_t data) {
+   printf("VIA#1 write %04X %02X\n",addr,data);
+   assert(addr < 0x20);
+}
+/*****************************************************************/
+static uint8_t via2_read(uint16_t addr) {
+   assert(addr < 0x20);
+   return 0;
+}
+static void via2_write(uint16_t addr, uint8_t data) {
+   printf("VIA#2 write %04X %02X\n",addr,data);
+   assert(addr < 0x20);
+}
+/*****************************************************************/
 static uint8_t mem_read_nolog(uint16_t addr) {
   uint8_t rtn;
 
@@ -622,6 +741,10 @@ static uint8_t mem_read_nolog(uint16_t addr) {
     rtn = ram[addr];
   else if(addr >= 0x9000 && addr< 0x9010)
     rtn = vic_read(addr-0x9000);
+  else if(addr >= 0x9110 && addr< 0x9120)
+    rtn = via1_read(addr-0x9110);
+  else if(addr >= 0x9120 && addr< 0x9130)
+    rtn = via2_read(addr-0x9110);
   else if(addr < 0xC000) {
     rtn = 0;
   }
@@ -664,6 +787,17 @@ static void mem_write(uint16_t addr, uint8_t data) {
     vic_write(addr-0x9000, data);
     return;
   }
+
+  if(addr >= 0x9110 && addr< 0x9120) {
+    via1_write(addr-0x9110, data);
+    return;
+  }
+
+  if(addr >= 0x9120 && addr< 0x9130) {
+    via2_write(addr-0x9110, data);
+    return;
+  }
+
 //  if(addr != 0x4000) {
     logger_16_8("Write to unmapped address", addr, data);
     trace_level |= TRACE_OP;
