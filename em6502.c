@@ -40,6 +40,7 @@ static void trace(char *msg);
 static uint16_t trace_addr;
 static uint8_t trace_opcode;
 static int32_t trace_num;
+static uint8_t trace_fetch_len;
 #define TRACE_OFF 0
 #define TRACE_OP  1
 #define TRACE_RD  2
@@ -100,6 +101,12 @@ static int8_t relative(void) {
 }
 
 static uint8_t addr_zpg_x(void) {
+  uint8_t  rtn = mem_fetch(state.pc)+state.x;
+  trace_num = rtn;
+  return rtn;
+}
+
+static uint8_t addr_zpg_x_ind(void) {
   uint8_t  z = mem_fetch(state.pc)+state.x;
   uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
   trace_num = rtn;
@@ -107,6 +114,26 @@ static uint8_t addr_zpg_x(void) {
 }
 
 /******************************************************************************/
+static void op00(void) {  // BRK     
+   trace("BRK");
+   mem_write(0x100+state.sp,   state.pc>>8);
+   mem_write(0x100+state.sp-1, state.pc&0xFF);
+   mem_write(0x100+state.sp-2, state.flags);    // TODO: SET THE BREAK BITS appropriately
+   state.sp    -= 3; 
+   state.pc     = mem_read(0xFFFC);
+   state.pc    |= mem_read(0xFFFD)<<8;   
+   state.flags |= FLAG_I;
+   trace("BRK");
+}
+
+static void op01(void) {  // ORA (zpg, X)
+  state.a  |= mem_read(addr_zpg_x_ind());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 6;
+  trace("ORA (zeropage %02X, X)");
+}
+
 static void op05(void) {  // AND zpg
   state.a |= mem_read(addr_zpg());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
@@ -145,6 +172,14 @@ static void op0A(void) {  // ASL A
   trace("ASL A");
 }
 
+static void op0D(void) {  // ORA abs
+  state.a      |= mem_read(addr_absolute());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 2; 
+  trace("LDA #%04X");
+}
+
 static void op10(void) {  // BPL rel
   int8_t offset = relative();
   if(state.flags & FLAG_N) {
@@ -154,6 +189,14 @@ static void op10(void) {  // BPL rel
     state.cycle += 3;  // TODO: +1 if boundary crossed
   }
   trace("BPL %02i");
+}
+
+static void op11(void) {  // ORA (zpg), Y
+  state.a  |= mem_read(addr_zpg_ind_y());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 6;
+  trace("ORA (zeropage %02X), Y");
 }
 
 static void op18(void) {  // CLC
@@ -173,7 +216,7 @@ static void op20(void) {  // JSR
 }
 
 static void op21(void) {  // AND (zpg, X)
-  state.a  &= mem_read(addr_zpg_x());
+  state.a  &= mem_read(addr_zpg_x_ind());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 6;
@@ -207,11 +250,63 @@ static void op30(void) {  // BMI rel
   trace("BMI %02i");
 }
 
+static void op31(void) {  // AND (zpg), Y
+  state.a  &= mem_read(addr_zpg_ind_y());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 6;
+  trace("AND (zeropage %02X), Y");
+}
+
+static void op40(void) {  // RTI
+  uint16_t o;
+  state.flags = mem_read(0x100+state.sp+1);
+  o = mem_read(0x100+state.sp+2) | (mem_read(0x100+state.sp+3)<<8);
+  state.sp    += 3; 
+  state.pc     = o;
+  state.cycle += 6; 
+  trace("RTI");
+}
+
+static void op41(void) {  // EOR (zpg, X)
+  state.a  ^= mem_read(addr_zpg_x_ind());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 6;
+  trace("EOR (zeropage %02X, X)");
+}
+
+
 static void op4C(void) {  // JMP
   uint16_t o = addr_absolute();
   state.pc     = o;
   state.cycle += 3; 
   trace("JMP #%04X");
+}
+
+static void op50(void) {  // BVC rel
+  int8_t offset = relative();
+  if(state.flags & FLAG_V) {
+    state.cycle += 2; 
+  } else {
+    state.pc    += offset;
+    state.cycle += 3;  // TODO: +1 if boundary crossed
+  }
+  trace("BVC %02i");
+}
+
+static void op51(void) {  // EOR (zpg), Y
+  state.a  ^= mem_read(addr_zpg_ind_y());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 6;
+  trace("EOR (zeropage %02X), Y");
+}
+
+static void op58(void) {  // CLI
+  state.flags &= ~FLAG_I;
+  state.cycle += 2; 
+  trace("CLI");
 }
 
 static void op60(void) {  // RTS
@@ -220,6 +315,18 @@ static void op60(void) {  // RTS
   state.pc     = o+1;
   state.cycle += 6; 
   trace("RTS");
+}
+
+static void op61(void) {  // ADC (ind, X)
+  uint16_t t = state.a;
+  t += mem_read(addr_zpg_x_ind());
+  t += (state.flags & FLAG_C ? 1 : 0);
+  state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  state.cycle += 4;   // TODO Decimal mode
+  trace("ADC (%02X, X)");
 }
 
 static void op69(void) {  // ADC #
@@ -251,10 +358,39 @@ static void op6A(void) {  // ROR A
   trace("ROR A");
 }
 
+static void op70(void) {  // BVS rel
+  int8_t offset = relative();
+  if(state.flags & FLAG_V) {
+    state.pc    += offset;
+    state.cycle += 3;  // TODO: +1 if boundary crossed
+  } else {
+    state.cycle += 2; 
+  }
+  trace("BVS %02i");
+}
+
+static void op71(void) {  // ADC (ind), Y
+  uint16_t t = state.a;
+  t += mem_read(addr_zpg_ind_y());
+  t += (state.flags & FLAG_C ? 1 : 0);
+  state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  state.cycle += 4;   // TODO Decimal mode
+  trace("ADC (%02X), Y");
+}
+
 static void op78(void) {  // SEI
   state.flags |= FLAG_I;
   state.cycle += 2; 
   trace("SEI");
+}
+
+static void op81(void) {  // STA (zpg, X)
+  mem_write(addr_zpg_x_ind(),state.a);
+  state.cycle += 6;
+  trace("STA (zeropage %02X, X)");
 }
 
 static void op84(void) {  // STY zpg
@@ -366,6 +502,14 @@ static void opA0(void) {  // LDY #
   trace("LDY #%02X");
 }
 
+static void opA1(void) {  // LDA (ind, X)
+  state.a = mem_read(addr_zpg_x_ind());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 3; 
+  trace("LDA zeropage %02X");
+}
+
 static void opA2(void) {  // LDX #
   state.x      = immediate();
   if(state.x == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
@@ -422,7 +566,7 @@ static void opAA(void) {  // TAX
 }
 
 static void opAD(void) {  // LDA abs
-  state.a      = addr_absolute();
+  state.a      = mem_read(addr_absolute());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 2; 
@@ -444,6 +588,23 @@ static void opB1(void) {  // LDA (zpg), y
   state.a = mem_read(addr_zpg_ind_y());
   state.cycle += 6;
   trace("LDA (zeropage %02X), Y");
+}
+
+static void opB4(void) {  // LDY zeropage, X
+  state.y = mem_read(addr_zpg_x());
+  if(state.y == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.y &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 3; 
+  trace("LDY zeropage %02X, X");
+}
+
+static void opB5(void) {  // LDA zeropage, X
+  state.a = mem_read(addr_zpg_x());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.cycle += 3; 
+  trace("LDA zeropage %02X");
 }
 
 static void opB9(void) {  // LDA abs, Y
@@ -587,39 +748,20 @@ static void opF0(void) {  // BEQ rel
 /*************** END OF ALL THE OPCODE IMPLEMENTATOINS **************************/
 /********************************************************************************/
 
-static uint8_t trace_len[256] = {
-//           00    01    02    03    04    05    06    07    08    09    0A    0B    0C    0D    0E    0F
-/* 00 */       1,    2,    0,    0,    0,    2,    2,    0,    1,    2,    1,    0,    0,    3,    3,    0,
-/* 10 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0,
-/* 20 */       3,    2,    0,    0,    2,    2,    2,    0,    1,    2,    1,    0,    1,    3,    3,    0,
-/* 30 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0,
-/* 40 */       1,    2,    0,    0,    0,    2,    2,    0,    1,    2,    1,    0,    3,    3,    3,    0,
-/* 50 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0,
-/* 60 */       1,    2,    0,    0,    0,    2,    2,    0,    1,    2,    1,    0,    1,    3,    3,    0,
-/* 70 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0,
-/* 80 */       0,    2,    0,    0,    2,    2,    2,    0,    1,    0,    1,    0,    3,    3,    3,    0,
-/* 90 */       2,    2,    0,    0,    2,    2,    2,    0,    1,    3,    1,    0,    0,    3,    0,    0,
-/* A0 */       2,    2,    2,    0,    2,    2,    2,    0,    1,    2,    1,    0,    1,    3,    3,    0,
-/* B0 */       2,    2,    0,    0,    2,    2,    2,    0,    1,    3,    1,    0,    1,    3,    3,    0,
-/* C0 */       2,    2,    0,    0,    2,    2,    2,    0,    1,    2,    1,    0,    1,    3,    3,    0,
-/* D0 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0,
-/* E0 */       2,    2,    0,    0,    2,    2,    2,    0,    1,    2,    1,    0,    1,    3,    3,    0,
-/* F0 */       2,    2,    0,    0,    0,    2,    2,    0,    1,    3,    0,    0,    0,    3,    3,    0};
-
 static void (*dispatch[256])(void) = {
 //           00    01    02    03    04    05    06    07    08    09    0A    0B    0C    0D    0E    0F
-/* 00 */    NULL, NULL, NULL, NULL, NULL, op05, NULL, NULL, op08, op09, op0A, NULL, NULL, NULL, NULL, NULL,
-/* 10 */    op10, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 00 */    op00, op01, NULL, NULL, NULL, op05, NULL, NULL, op08, op09, op0A, NULL, NULL, op0D, NULL, NULL,
+/* 10 */    op10, op11, NULL, NULL, NULL, NULL, NULL, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 20 */    op20, op21, NULL, NULL, NULL, op25, NULL, NULL, NULL, op29, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 30 */    op30, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 40 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op4C, NULL, NULL, NULL,
-/* 50 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 60 */    op60, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op69, op6A, NULL, NULL, NULL, NULL, NULL,
-/* 70 */    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op78, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 80 */    NULL, NULL, NULL, NULL, op84, op85, op86, NULL, op88, NULL, op8A, NULL, op8C, op8D, op8E, NULL,
+/* 30 */    op30, op31, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 40 */    op40, op41, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op4C, NULL, NULL, NULL,
+/* 50 */    op50, op51, NULL, NULL, NULL, NULL, NULL, NULL, op58, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 60 */    op60, op61, NULL, NULL, NULL, NULL, NULL, NULL, NULL, op69, op6A, NULL, NULL, NULL, NULL, NULL,
+/* 70 */    op70, op71, NULL, NULL, NULL, NULL, NULL, NULL, op78, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 80 */    NULL, op81, NULL, NULL, op84, op85, op86, NULL, op88, NULL, op8A, NULL, op8C, op8D, op8E, NULL,
 /* 90 */    op90, op91, NULL, NULL, op94, op95, NULL, NULL, NULL, op99, op9A, NULL, NULL, op9D, NULL, NULL,
-/* A0 */    opA0, NULL, opA2, NULL, opA4, opA5, opA6, NULL, opA8, opA9, opAA, NULL, NULL, opAD, NULL, NULL,
-/* B0 */    opB0, opB1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opB9, NULL, NULL, NULL, opBD, NULL, NULL,
+/* A0 */    opA0, opA1, opA2, NULL, opA4, opA5, opA6, NULL, opA8, opA9, opAA, NULL, NULL, opAD, NULL, NULL,
+/* B0 */    opB0, opB1, NULL, NULL, opB4, opB5, NULL, NULL, NULL, opB9, NULL, NULL, NULL, opBD, NULL, NULL,
 /* C0 */    opC0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, opC8, opC9, opCA, NULL, NULL, NULL, NULL, NULL,
 /* D0 */    opD0, opD1, NULL, NULL, NULL, NULL, NULL, NULL, opD8, NULL, NULL, NULL, NULL, opDD, NULL, NULL,
 /* E0 */    opE0, NULL, NULL, NULL, NULL, NULL, opE6, NULL, opE8, NULL, opEA, NULL, NULL, NULL, NULL, NULL,
@@ -770,6 +912,7 @@ static uint8_t mem_fetch(uint16_t addr) {
   uint8_t rtn = 0;
   rtn = mem_read_nolog(addr);
   state.pc++;
+  trace_fetch_len++;
   if(trace_level & TRACE_FETCH)
     logger_16_8("  Fetch",addr, rtn);
   return rtn;
@@ -813,7 +956,7 @@ static void trace(char *msg) {
   inst = mem_read_nolog(trace_addr);
   printf("%04X: %02X ", trace_addr, inst);
 
-  for(i = 1; i < trace_len[inst]; i++) {
+  for(i = 1; i < trace_fetch_len; i++) {
     printf("%02X ", mem_read_nolog(trace_addr+i));
   }
 
@@ -836,6 +979,7 @@ static void trace(char *msg) {
 static int cpu_run(void) {
    uint8_t inst;
    trace_addr   = state.pc; 
+   trace_fetch_len    = 0;
    inst         = mem_fetch(state.pc);
    trace_opcode = inst;
    if(dispatch[inst]==0) {
