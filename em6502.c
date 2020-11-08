@@ -1,14 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <assert.h>
 
 /************************************
 * Memory contents 
 ************************************/
-static uint8_t ram[1024*56];
+static uint8_t ram[1024*8];
 static uint8_t rom1[1024*8];
 static uint8_t rom2[1024*8];
+static uint8_t rom3[1024*4];
+static uint8_t vic[16];
+static uint8_t colour[1024];
 
 static uint8_t mem_read(uint16_t addr);
 static uint8_t mem_fetch(uint16_t addr);
@@ -32,6 +36,7 @@ static struct cpu_state {
   uint16_t pc;
   uint32_t cycle;
 } state;
+uint32_t last_display = 0;
 static void cpu_dump(void);
 /**************************************
 * For tracing execution
@@ -48,7 +53,8 @@ static uint8_t trace_fetch_len;
 #define TRACE_FETCH  8
 
 //static int trace_level = TRACE_OP|TRACE_RD|TRACE_WR|TRACE_FETCH;
-//static int trace_level = TRACE_OP|TRACE_WR;
+//static int trace_level = TRACE_OP|TRACE_RD;
+//static int trace_level = TRACE_OP|TRACE_WR|TRACE_RD;
 //static int trace_level = TRACE_OP;
 static int trace_level = TRACE_OFF;
 
@@ -101,16 +107,17 @@ static int8_t relative(void) {
 }
 
 static uint8_t addr_zpg_x(void) {
-  uint8_t  rtn = mem_fetch(state.pc)+state.x;
+  uint8_t  rtn = mem_fetch(state.pc);
   trace_num = rtn;
+  rtn += state.x;
   return rtn;
 }
 
 static uint8_t addr_zpg_x_ind(void) {
-  uint8_t  z = mem_fetch(state.pc)+state.x;
-  uint16_t rtn = mem_read(z) | (mem_read(z+1)<<8);
-  trace_num = rtn;
-  return rtn;
+  uint8_t  z = mem_fetch(state.pc);
+  trace_num = z;
+  z += state.x;
+  return mem_read(z+state.x) | (mem_read(z+state.x+1)<<8);
 }
 
 /******************************************************************************/
@@ -166,12 +173,12 @@ static void op08(void) {  // PHP
   trace("PHP");
 }
 
-static void op09(void) {  // AND #
+static void op09(void) {  // ORA #
   state.a |= immediate();
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 4;
-  trace("AND #%02X");
+  trace("ORA #%02X");
 }
 
 static void op0A(void) {  // ASL A
@@ -214,6 +221,23 @@ static void op11(void) {  // ORA (zpg), Y
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 6;
   trace("ORA (zeropage %02X), Y");
+}
+
+static void op16(void) {  // ASL zpg, X
+  uint16_t a = addr_zpg_x();
+  uint16_t t = mem_read(a);
+  if(t&1) { 
+    state.flags |= FLAG_C;
+  } else {
+    state.flags &= ~FLAG_C;
+  }
+  t = (t>>1) | (t&0x80);
+  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.cycle += 5; 
+  trace("ASL zeropage %02X, X");
+  mem_write(a,t);
 }
 
 static void op18(void) {  // CLC
@@ -336,11 +360,36 @@ static void op41(void) {  // EOR (zpg, X)
   trace("EOR (zeropage %02X, X)");
 }
 
+static void op46(void) {  // LSR zpg
+  uint16_t a = addr_zpg();
+  uint16_t t = mem_read(a);
+  t = (t<<1);
+  if(t&0x100) { 
+    state.flags |= FLAG_C;
+  } else {
+    state.flags &= ~FLAG_C;
+  }
+  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.cycle += 5; 
+  trace("LSR zeropage %02X");
+  mem_write(a,t);
+}
+
 static void op48(void) {  // PHA
   mem_write(0x100+state.sp,   state.a);
   state.sp    -= 1; 
   state.cycle += 3; 
   trace("PHA");
+}
+
+static void op49(void) {  // EOR #
+  state.a &= immediate();
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 4;
+  trace("EOR #%02X");
 }
 
 static void op4C(void) {  // JMP
@@ -367,6 +416,23 @@ static void op51(void) {  // EOR (zpg), Y
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 6;
   trace("EOR (zeropage %02X), Y");
+}
+
+static void op56(void) {  // LSR zpg, X
+  uint16_t a = addr_zpg_x();
+  uint16_t t = mem_read(a);
+  t = (t<<1);
+  if(t&0x100) { 
+    state.flags |= FLAG_C;
+  } else {
+    state.flags &= ~FLAG_C;
+  }
+  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.cycle += 5; 
+  trace("LSR zeropage %02X, X");
+  mem_write(a,t);
 }
 
 static void op58(void) {  // CLI
@@ -596,7 +662,7 @@ static void op9A(void) {  // TXS
 }
 
 static void op9D(void) {  // STA abs, X
-  mem_write(addr_absolute(), state.a);
+  mem_write(addr_absolute_x(), state.a);
   state.cycle += 4;
   trace("STA %04X, X");
 }
@@ -709,6 +775,8 @@ static void opB0(void) {  // BCS rel
 
 static void opB1(void) {  // LDA (zpg), y
   state.a = mem_read(addr_zpg_ind_y());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 6;
   trace("LDA (zeropage %02X), Y");
 }
@@ -727,7 +795,7 @@ static void opB5(void) {  // LDA zeropage, X
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
   state.cycle += 3; 
-  trace("LDA zeropage %02X");
+  trace("LDA zeropage %02X, X");
 }
 
 static void opB9(void) {  // LDA abs, Y
@@ -781,7 +849,7 @@ static void opC8(void) {  // INY
   if((state.y) == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if((state.y) & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 2; 
-  trace("INX");
+  trace("INY");
 }
 
 static void opC9(void) {  // CMP #
@@ -931,11 +999,11 @@ static void opF0(void) {  // BEQ rel
 static void (*dispatch[256])(void) = {
 //           00    01    02    03    04    05    06    07    08    09    0A    0B    0C    0D    0E    0F
 /* 00 */    op00, op01, NULL, NULL, NULL, op05, op06, NULL, op08, op09, op0A, NULL, NULL, op0D, NULL, NULL,
-/* 10 */    op10, op11, NULL, NULL, NULL, NULL, NULL, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 10 */    op10, op11, NULL, NULL, NULL, NULL, op16, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 20 */    op20, op21, NULL, NULL, op24, op25, op26, NULL, op28, op29, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 30 */    op30, op31, NULL, NULL, NULL, NULL, NULL, NULL, op38, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 40 */    op40, op41, NULL, NULL, NULL, NULL, NULL, NULL, op48, NULL, NULL, NULL, op4C, NULL, NULL, NULL,
-/* 50 */    op50, op51, NULL, NULL, NULL, NULL, NULL, NULL, op58, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 40 */    op40, op41, NULL, NULL, NULL, NULL, op46, NULL, op48, op49, NULL, NULL, op4C, NULL, NULL, NULL,
+/* 50 */    op50, op51, NULL, NULL, NULL, NULL, op56, NULL, op58, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 60 */    op60, op61, NULL, NULL, NULL, op65, NULL, NULL, op68, op69, op6A, NULL, op6C, NULL, NULL, NULL,
 /* 70 */    op70, op71, NULL, NULL, NULL, NULL, NULL, NULL, op78, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 /* 80 */    NULL, op81, NULL, NULL, op84, op85, op86, NULL, op88, NULL, op8A, NULL, op8C, op8D, op8E, NULL,
@@ -1030,10 +1098,11 @@ HEX       DECIMAL       DESCRIPTION
 #endif
 static uint8_t vic_read(uint16_t addr) {
    assert(addr < 0x10);
-   return 0;
+   return vic[addr];
 }
 static void vic_write(uint16_t addr, uint8_t data) {
    printf("VIC write %04X %02X\n",addr,data);
+   vic[addr] = data;
    assert(addr < 0x10);
 }
 
@@ -1059,7 +1128,7 @@ static void via2_write(uint16_t addr, uint8_t data) {
 static uint8_t mem_read_nolog(uint16_t addr) {
   uint8_t rtn;
 
-  if(addr < 0x4000) 
+  if(addr < sizeof(ram)) 
     rtn = ram[addr];
   else if(addr >= 0x9000 && addr< 0x9010)
     rtn = vic_read(addr-0x9000);
@@ -1067,6 +1136,8 @@ static uint8_t mem_read_nolog(uint16_t addr) {
     rtn = via1_read(addr-0x9110);
   else if(addr >= 0x9120 && addr< 0x9130)
     rtn = via2_read(addr-0x9110);
+  else if(addr >= 0x9400 && addr< 0x9800)
+    rtn = colour[addr-0x9400];
   else if(addr < 0xC000) {
     rtn = 0;
   }
@@ -1102,7 +1173,7 @@ static void mem_write(uint16_t addr, uint8_t data) {
   if(trace_level & TRACE_WR)
     logger_16_8("  Write", addr, data);
 
-  if(addr < 0x4000)  {
+  if(addr < sizeof(ram))  {
       ram[addr] = data;
       return;
   }
@@ -1121,9 +1192,14 @@ static void mem_write(uint16_t addr, uint8_t data) {
     return;
   }
 
+  if(addr >= 0x9400 && addr< 0x9800) {
+    colour[addr-0x9400] = data;
+    return;
+  }
+
 //  if(addr != 0x4000) {
     logger_16_8("Write to unmapped address", addr, data);
-    trace_level |= TRACE_OP;
+//    trace_level |= TRACE_OP;
 //  }
 }
 
@@ -1134,7 +1210,7 @@ static void trace(char *msg) {
      return;
 
   inst = mem_read_nolog(trace_addr);
-  printf("%04X: %02X ", trace_addr, inst);
+  printf("%10i %04X: %02X ", state.cycle, trace_addr, inst);
 
   for(i = 1; i < trace_fetch_len; i++) {
     printf("%02X ", mem_read_nolog(trace_addr+i));
@@ -1145,6 +1221,7 @@ static void trace(char *msg) {
     i++;
   }
 #if 0
+  printf("%02X %02X %02X ",state.a, state.x, state.y);
   if(state.flags & FLAG_C) 
     printf("C ");
   else
@@ -1153,6 +1230,110 @@ static void trace(char *msg) {
 
   printf(msg, trace_num);
   printf("\n");
+}
+
+void border_pixel(FILE *f) {
+   putc(64,f);
+   putc(64,f);
+   putc(255,f);
+}
+
+uint8_t colours[16][3] = {
+   {  0,  0,  0},   //BLACK            000
+   {255,255,255},   //WHITE            001
+   {255,  0,  0},   //RED              010
+   {  0,255,255},   //CYAN             011
+   {255,  0,255},   //PURPLE           100
+   {  0,255,  0},   //GREEN            101
+   {  0,  0,255},   //BLUE             110
+   {255,255,  0},   //YELLOW           111
+   {255,128,  0},   //    8 - 1000   Orange
+   {255,192, 64},   //    9 - 1001   Light orange
+   {255,128,128},   //    10 - 1010   Pink
+   {128,255,255},   //    11 - 1011   Light cyan
+   {255,128,255},   //    12 - 1100   Light purple
+   {128,255,128},   //    13 - 1101   Light green
+   {128,128,255},   //    14 - 1110   Light blue
+   {255,255,128},   //    15 - 1111   Light yellow
+};
+
+uint16_t vram_lookup[32] = {
+    0x8000, 0x8200, 0x8400, 0x8600, 0x8800, 0x8A00, 0x8C00, 0x8E00,
+    0x9000, 0x9200, 0x9400, 0x9600, 0x9800, 0x9A00, 0x9C00, 0x9E00,
+    0xE000, 0x0200, 0x0400, 0x0600, 0x0800, 0x0A00, 0x0C00, 0x0E00,
+    0x1000, 0x1200, 0x1400, 0x1600, 0x1800, 0x1A00, 0x1C00, 0x1E00
+};
+
+void pixel(FILE *f, int colour) {
+   putc(colours[colour][0],f);
+   putc(colours[colour][1],f);
+   putc(colours[colour][2],f);
+}
+
+void show_display(void) {
+   int i, j;
+   FILE *f = fopen("display.ppm", "wb");
+   if(f == NULL)
+     return;
+   int width  = 12+22*8+12;
+   int height = 38+23*8+38;
+   fprintf(f,"P6\n%i %i\n255\n", width, height);
+
+   uint16_t colour_ram_addr;
+   uint16_t video_ram_addr;
+   int bg_colour = mem_read_nolog(0x900F)>>4;
+   int bd_colour = mem_read_nolog(0x900F)&0x7;
+   int hoz_pos   = mem_read_nolog(0x9000)&0x7F; 
+   int vert_pos  = mem_read_nolog(0x9001); 
+
+   if(hoz_pos >= 24) hoz_pos = 24;
+
+   video_ram_addr  = (mem_read_nolog(0x9005)&0xF0)>>3; // 4 bits
+   video_ram_addr += (mem_read_nolog(0x9002)&0x80)>>7; // 1 bit
+   video_ram_addr = vram_lookup[video_ram_addr];   
+   video_ram_addr = 0x1000;  // TODO: Something odd with this = override computed value
+
+   if(mem_read_nolog(0x9002) & 0x80) 
+      colour_ram_addr = 0x9600;
+   else 
+      colour_ram_addr = 0x9400;
+   
+   for(i = 0; i < height; i++) {
+      if(i < vert_pos && i >= vert_pos+23*8) {
+         // Top or bottom frame
+         for(j = 0; j < width; j++) {
+            pixel(f, bd_colour);
+         }
+      } else {
+         // Left frame
+         for(j = 0; j < hoz_pos; j++) {
+            pixel(f, bd_colour);
+         }
+
+         // Center
+         for(j = 0; j < 22*8 && j+hoz_pos < width; j++) {
+            int offset = ((i-vert_pos)>>3)*22+(j>>3);
+            int line = (i-vert_pos)&7;
+            int col  = j&7; 
+            char glyph = mem_read_nolog(video_ram_addr+offset);
+            int fg_colour = mem_read_nolog(colour_ram_addr+offset) & 0x7;
+            uint8_t byte = rom3[glyph*8+line];
+            uint8_t mask = 0x80 >> col;
+
+            if(byte & mask) {
+                pixel(f, fg_colour);
+            } else {
+                pixel(f, bg_colour);
+            }
+         }
+
+         // Right frame
+         for(j = 0; j < width-22*8-hoz_pos; j++) {
+            pixel(f, bd_colour);
+         }
+      }
+   } 
+   fclose(f);
 }
 
 
@@ -1165,6 +1346,7 @@ static int cpu_run(void) {
    if(dispatch[inst]==0) {
       logger_16_8("Unknown opcode at address",trace_addr, inst);
       cpu_dump();
+      show_display(); 
       return 0;
    }
    dispatch[inst]();
@@ -1183,7 +1365,7 @@ static void cpu_reset(void) {
 static int rom1_load() {
    FILE *f = fopen("rom1.img","rb");
    if(f == NULL) {
-      fprintf(stderr, "Unable to open 'rom.img'\n");
+      fprintf(stderr, "Unable to open 'rom1.img'\n");
       return 0;
    }
    if(fread(rom1,8192,1,f) != 1) {
@@ -1198,7 +1380,7 @@ static int rom1_load() {
 static int rom2_load() {
    FILE *f = fopen("rom2.img","rb");
    if(f == NULL) {
-      fprintf(stderr, "Unable to open 'rom.img'\n");
+      fprintf(stderr, "Unable to open 'rom2.img'\n");
       return 0;
    }
    if(fread(rom2,8192,1,f) != 1) {
@@ -1210,11 +1392,40 @@ static int rom2_load() {
    return 1;
 }
 
+static int rom3_load() {
+   FILE *f = fopen("rom3.img","rb");
+   if(f == NULL) {
+      fprintf(stderr, "Unable to open 'rom3.img'\n");
+      return 0;
+   }
+   if(fread(rom3,4096,1,f) != 1) {
+      fclose(f);
+      return 0;
+   }
+   fclose(f);
+   printf("ROM3 loaded\n");
+   return 1;
+}
+
 int main(int argc, char *argv[]) {
-   if(rom1_load() && rom2_load()) {
+   if(argc != 1 && argc != 3) {
+      printf("Unknown opton\n");
+      exit(1);
+   }
+   if(argc == 3)  {
+      if(strcmp(argv[1],"-v")!=0) {
+         printf("Unknown opton\n");
+         exit(1);
+      }
+      trace_level = atoi(argv[2]);
+   }
+   if(rom1_load() && rom2_load() && rom3_load()) {
       cpu_reset();
       while(cpu_run()) {
-         ;
+         if(state.cycle - last_display > 1000000) {
+            show_display();
+            last_display = state.cycle;
+         }
       }
       if(0)
         logger_8("remove warning for unused logger_8()",0);
