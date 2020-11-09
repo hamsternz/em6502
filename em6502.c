@@ -113,6 +113,13 @@ static uint8_t addr_zpg_x(void) {
   return rtn;
 }
 
+static uint8_t addr_zpg_y(void) {
+  uint8_t  rtn = mem_fetch(state.pc);
+  trace_num = rtn;
+  rtn += state.y;
+  return rtn;
+}
+
 static uint8_t addr_zpg_x_ind(void) {
   uint8_t  z = mem_fetch(state.pc);
   trace_num = z;
@@ -141,12 +148,12 @@ static void op01(void) {  // ORA (zpg, X)
   trace("ORA (zeropage %02X, X)");
 }
 
-static void op05(void) {  // AND zpg
+static void op05(void) {  // ORA zpg
   state.a |= mem_read(addr_zpg());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 4;
-  trace("AND zeropage %02X");
+  trace("ORA zeropage %02X");
 }
 
 static void op06(void) {  // ASL zpg
@@ -221,6 +228,14 @@ static void op11(void) {  // ORA (zpg), Y
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 6;
   trace("ORA (zeropage %02X), Y");
+}
+
+static void op15(void) {  // ORA zpg, X
+  state.a |= mem_read(addr_zpg_x());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 4;
+  trace("ORA zeropage %02X, X");
 }
 
 static void op16(void) {  // ASL zpg, X
@@ -336,6 +351,34 @@ static void op31(void) {  // AND (zpg), Y
   trace("AND (zeropage %02X), Y");
 }
 
+static void op35(void) {  // AND zpg, X
+  state.a &= mem_read(addr_zpg_x());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 4;
+  trace("AND zeropage %02X, X");
+}
+
+static void op36(void) {  // ROL zpg, X
+  uint16_t a = addr_zpg_x();
+  uint16_t t = mem_read(a);
+
+  if(state.flags & FLAG_C) 
+    t |= 0x100;
+  if(t&1) { 
+    state.flags |= FLAG_C;
+  } else {
+    state.flags &= ~FLAG_C;
+  }
+  t = (t>>1) | (t&0x80);
+  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+
+  state.cycle += 5; 
+  trace("ROL zeropage %02X, X");
+  mem_write(a,t);
+}
+
 static void op38(void) {  // SEC
   state.flags |= FLAG_C;
   state.cycle += 2; 
@@ -359,6 +402,14 @@ static void op41(void) {  // EOR (zpg, X)
   state.cycle += 6;
   trace("EOR (zeropage %02X, X)");
 }
+
+static void op45(void) {  // EOR zpg
+  state.a ^= mem_read(addr_zpg());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 4;
+  trace("EOR zeropage %02X");
+} 
 
 static void op46(void) {  // LSR zpg
   uint16_t a = addr_zpg();
@@ -417,6 +468,14 @@ static void op51(void) {  // EOR (zpg), Y
   state.cycle += 6;
   trace("EOR (zeropage %02X), Y");
 }
+
+static void op55(void) {  // EOR zpg, X
+  state.a ^= mem_read(addr_zpg_x());
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 4;
+  trace("EOR zeropage %02X, X");
+} 
 
 static void op56(void) {  // LSR zpg, X
   uint16_t a = addr_zpg_x();
@@ -548,6 +607,19 @@ static void op71(void) {  // ADC (ind), Y
   trace("ADC (%02X), Y");
 }
 
+static void op75(void) {  // ADC zpg, X
+  uint16_t t = state.a;
+  t += mem_read(addr_zpg_x());
+  t += (state.flags & FLAG_C ? 1 : 0);
+  state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  // TODO - OVERFLOW FLAGS
+  if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  state.cycle += 4;   // TODO Decimal mode
+  trace("ADC zeropage %02X, X");
+}
+
 static void op78(void) {  // SEI
   state.flags |= FLAG_I;
   state.cycle += 2; 
@@ -640,6 +712,12 @@ static void op95(void) {  // STA zpg, X
   mem_write(addr_zpg_x(),state.a);
   state.cycle += 4;
   trace("STA zeropage %02X, X");
+}
+
+static void op96(void) {  // STX zpg, Y
+  mem_write(addr_zpg_y(), state.x);
+  state.cycle += 4;
+  trace("STX zeropage %02X, Y");
 }
 
 static void op98(void) {  // TYA
@@ -798,6 +876,21 @@ static void opB5(void) {  // LDA zeropage, X
   trace("LDA zeropage %02X, X");
 }
 
+static void opB6(void) {  // LDX zeropage, Y
+  state.x = mem_read(addr_zpg_y());
+  if(state.x == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.x &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 3; 
+  trace("LDX zeropage %02X, Y");
+}
+
+
+static void opB8(void) {  // CLV
+  state.flags &= ~FLAG_V;
+  state.cycle += 2; 
+  trace("CLV");
+}
+
 static void opB9(void) {  // LDA abs, Y
   state.a      = mem_read(addr_absolute_y());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
@@ -824,6 +917,18 @@ static void opC0(void) {  // CPY #
   trace("CPY #%02X");
 }
 
+static void opC1(void) {  // CMP (zpg, x)
+  uint8_t  m = mem_read(addr_zpg_x_ind());
+  uint8_t  d = state.a - m;
+  state.cycle += 6;
+  
+  if(d == 0)       state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(d & 0x80)     state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.a >= m) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  
+  trace("CMP (zeropage %02X, X)");
+}
+
 static void opC4(void) {  // CPY zpg
   uint16_t val = mem_read(addr_zpg());
   uint8_t  d = state.y - val;
@@ -842,6 +947,17 @@ static void opC5(void) {  // CMP zpg
   if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   if(state.a >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
   trace("CMP zeropage %02X");
+}
+
+static void opC6(void) {  // DEC zeropage
+  uint8_t z = addr_zpg();
+  uint8_t t = mem_read(z);
+  t--;
+  mem_write(z,t);
+  if(t == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(t & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 5; 
+  trace("DEC zeropage %02X");
 }
 
 static void opC8(void) {  // INY
@@ -893,6 +1009,27 @@ static void opD1(void) {  // CMP (zpg), y
   trace("CMP (zeropage %02X), Y");
 }
 
+static void opD5(void) {  // CMP zpg, X
+  uint16_t val = mem_read(addr_zpg_x());
+  uint8_t  d = state.a - val;
+  state.cycle += 4;  // TODO: +1 if boundary crossed
+  if(d == 0)         state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(state.a >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  trace("CMP zeropage %02X, X");
+}
+
+static void opD6(void) {  // DEC zeropage, X
+  uint8_t z = addr_zpg_x();
+  uint8_t t = mem_read(z);
+  t--;
+  mem_write(z,t);
+  if(t == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(t & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 6; 
+  trace("DEC zeropage %02X");
+}
+
 static void opD8(void) {  // CLD
   state.flags &= ~FLAG_D;
   state.cycle += 2; 
@@ -917,6 +1054,19 @@ static void opE0(void) {  // CPX #
   if(d & 0x80)       state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   if(state.x >= val) state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
   trace("CPX #%02X");
+}
+
+static void opE1(void) {  // SBC zpg, X
+  uint16_t t = state.a;
+  t += ~mem_read(addr_zpg_x_ind());  // TODO - check Carry flags
+  t += (state.flags & FLAG_C ? 1 : 0);
+  state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  // TODO - OVERFLOW FLAGS
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  state.cycle += 4;   // TODO Decimal mode
+  trace("SBC zeropage %02X, X");
 }
 
 static void opE4(void) {  // CPX zpg
@@ -992,28 +1142,72 @@ static void opF0(void) {  // BEQ rel
   trace("BEQ %02i");
 }
 
+static void opF1(void) {  // SBC zpg, Y
+  uint16_t t = state.a;
+  t += ~mem_read(addr_zpg_ind_y());  // TODO - check Carry flags
+  t += (state.flags & FLAG_C ? 1 : 0);
+  state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  // TODO - OVERFLOW FLAGS
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  state.cycle += 4;   // TODO Decimal mode
+  trace("SBC zeropage %02X, Y");
+}
+
+static void opF5(void) {  // SBC zpg, X
+  uint16_t t = state.a;
+  t += ~mem_read(addr_zpg_x());  // TODO - check Carry flags
+  t += (state.flags & FLAG_C ? 1 : 0);
+  state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  // TODO - OVERFLOW FLAGS
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
+  state.cycle += 4;   // TODO Decimal mode
+  trace("SBC zeropage %02X, X");
+}
+
+static void opF6(void) {  // INC zeropage, X
+  uint8_t z = addr_zpg_x();
+  uint8_t t = mem_read(z);
+  t++;
+  mem_write(z,t);
+  if(t == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(t & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
+  state.cycle += 6; 
+  trace("INC zeropage %02X");
+}
+
+static void opF8(void) {  // SED
+  state.flags |= FLAG_D;
+  state.cycle += 2; 
+  printf("DECIMAL NODE NOT IMPLEMENTED YET!\n");
+  trace("SED");
+}
+
 /********************************************************************************/
 /*************** END OF ALL THE OPCODE IMPLEMENTATOINS **************************/
 /********************************************************************************/
 
 static void (*dispatch[256])(void) = {
 //           00    01    02    03    04    05    06    07    08    09    0A    0B    0C    0D    0E    0F
-/* 00 */    op00, op01, NULL, NULL, NULL, op05, op06, NULL, op08, op09, op0A, NULL, NULL, op0D, NULL, NULL,
-/* 10 */    op10, op11, NULL, NULL, NULL, NULL, op16, NULL, op18, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 20 */    op20, op21, NULL, NULL, op24, op25, op26, NULL, op28, op29, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 30 */    op30, op31, NULL, NULL, NULL, NULL, NULL, NULL, op38, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 40 */    op40, op41, NULL, NULL, NULL, NULL, op46, NULL, op48, op49, NULL, NULL, op4C, NULL, NULL, NULL,
-/* 50 */    op50, op51, NULL, NULL, NULL, NULL, op56, NULL, op58, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-/* 60 */    op60, op61, NULL, NULL, NULL, op65, NULL, NULL, op68, op69, op6A, NULL, op6C, NULL, NULL, NULL,
-/* 70 */    op70, op71, NULL, NULL, NULL, NULL, NULL, NULL, op78, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+/* 00 */    op00, op01, NULL, NULL, NULL, op05, op06, NULL, op08, op09, op0A, NULL, NULL, op0D,    0, NULL,
+/* 10 */    op10, op11, NULL, NULL, NULL, op15, op16, NULL, op18,    0, NULL, NULL, NULL,    0,    0, NULL,
+/* 20 */    op20, op21, NULL, NULL, op24, op25, op26, NULL, op28, op29,    0, NULL,    0,    0,    0, NULL,
+/* 30 */    op30, op31, NULL, NULL, NULL, op35, op36, NULL, op38,    0, NULL, NULL, NULL,    0,    0, NULL,
+/* 40 */    op40, op41, NULL, NULL, NULL, op45, op46, NULL, op48, op49,    0, NULL, op4C,    0,    0, NULL,
+/* 50 */    op50, op51, NULL, NULL, NULL, op55, op56, NULL, op58,    0, NULL, NULL, NULL,    0,    0, NULL,
+/* 60 */    op60, op61, NULL, NULL, NULL, op65,    0, NULL, op68, op69, op6A, NULL, op6C,    0,    0, NULL,
+/* 70 */    op70, op71, NULL, NULL, NULL, op75,    0, NULL, op78,    0, NULL, NULL, NULL,    0,    0, NULL,
 /* 80 */    NULL, op81, NULL, NULL, op84, op85, op86, NULL, op88, NULL, op8A, NULL, op8C, op8D, op8E, NULL,
-/* 90 */    op90, op91, NULL, NULL, op94, op95, NULL, NULL, op98, op99, op9A, NULL, NULL, op9D, NULL, NULL,
+/* 90 */    op90, op91, NULL, NULL, op94, op95, op96, NULL, op98, op99, op9A, NULL, NULL, op9D, NULL, NULL,
 /* A0 */    opA0, opA1, opA2, NULL, opA4, opA5, opA6, NULL, opA8, opA9, opAA, NULL, opAC, opAD, opAE, NULL,
-/* B0 */    opB0, opB1, NULL, NULL, opB4, opB5, NULL, NULL, NULL, opB9, NULL, NULL, NULL, opBD, NULL, NULL,
-/* C0 */    opC0, NULL, NULL, NULL, opC4, opC5, NULL, NULL, opC8, opC9, opCA, NULL, NULL, NULL, NULL, NULL,
-/* D0 */    opD0, opD1, NULL, NULL, NULL, NULL, NULL, NULL, opD8, NULL, NULL, NULL, NULL, opDD, NULL, NULL,
-/* E0 */    opE0, NULL, NULL, NULL, opE4, opE5, opE6, NULL, opE8, opE9, opEA, NULL, NULL, NULL, NULL, NULL,
-/* F0 */    opF0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+/* B0 */    opB0, opB1, NULL, NULL, opB4, opB5, opB6, NULL, opB8, opB9,    0, NULL,    0, opBD,    0, NULL,
+/* C0 */    opC0, opC1, NULL, NULL, opC4, opC5, opC6, NULL, opC8, opC9, opCA, NULL,    0,    0,    0, NULL,
+/* D0 */    opD0, opD1, NULL, NULL, NULL, opD5, opD6, NULL, opD8,    0, NULL, NULL, NULL, opDD,    0, NULL,
+/* E0 */    opE0, opE1, NULL, NULL, opE4, opE5, opE6, NULL, opE8, opE9, opEA, NULL,    0,    0,    0, NULL,
+/* F0 */    opF0, opF1, NULL, NULL, NULL, opF5, opF6, NULL, opF8,    0, NULL, NULL, NULL,    0,    0, NULL};
 
 static void logger_8(char *message, uint8_t data) {
   printf("%s %02X\n", message, data);
@@ -1320,11 +1514,7 @@ void show_display(void) {
             uint8_t byte = rom3[glyph*8+line];
             uint8_t mask = 0x80 >> col;
 
-            if(byte & mask) {
-                pixel(f, fg_colour);
-            } else {
-                pixel(f, bg_colour);
-            }
+            pixel(f, (byte&mask) ? fg_colour : bg_colour);
          }
 
          // Right frame
@@ -1422,7 +1612,7 @@ int main(int argc, char *argv[]) {
    if(rom1_load() && rom2_load() && rom3_load()) {
       cpu_reset();
       while(cpu_run()) {
-         if(state.cycle - last_display > 1000000) {
+         if(state.cycle - last_display > 3000000) {
             show_display();
             last_display = state.cycle;
          }
