@@ -155,7 +155,7 @@ static void op05(void) {  // ORA zpg
   state.a |= mem_read(addr_zpg());
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.cycle += 4;
+  state.cycle += 3;
   trace("ORA zeropage %02X");
 }
 
@@ -168,7 +168,7 @@ static void op06(void) {  // ASL zpg
     state.flags &= ~FLAG_C;
   }
   t = t<<1;
-  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if((t & 0xFF) == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
   state.cycle += 5; 
@@ -187,18 +187,18 @@ static void op09(void) {  // ORA #
   state.a |= immediate();
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
-  state.cycle += 4;
+  state.cycle += 2;
   trace("ORA #%02X");
 }
 
 static void op0A(void) {  // ASL A
   uint16_t t = state.a;
-  if(t&1) { 
+  if(t&0x80) { 
     state.flags |= FLAG_C;
   } else {
     state.flags &= ~FLAG_C;
   }
-  state.a = (t>>1) | (t&0x80);
+  state.a <<=  1;
   if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
@@ -241,16 +241,16 @@ static void op15(void) {  // ORA zpg, X
   trace("ORA zeropage %02X, X");
 }
 
-static void op16(void) {  // ASL zpg, X
+static void op16(void) {  // ASL zpg, X   /// FIXED
   uint16_t a = addr_zpg_x();
   uint16_t t = mem_read(a);
-  if(t&1) { 
+  if(t&0x80) { 
     state.flags |= FLAG_C;
   } else {
     state.flags &= ~FLAG_C;
   }
-  t = (t>>1) | (t&0x80);
-  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  t = t<<1;
+  if((t & 0xFF) == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
   state.cycle += 5; 
@@ -443,9 +443,8 @@ static void op45(void) {  // EOR zpg
 static void op46(void) {  // LSR zpg
   uint16_t a = addr_zpg();
   uint16_t t = mem_read(a);
-  if(state.flags & FLAG_C)
-    t |= 0x100;
-  if(t&0x100) { 
+
+  if(t&0x1) { 
     state.flags |= FLAG_C;
   } else {
     state.flags &= ~FLAG_C;
@@ -476,8 +475,6 @@ static void op49(void) {  // EOR #
 
 static void op4A(void) {  // LSR A
   uint16_t t = state.a;
-  if(state.flags & FLAG_C)
-    t |= 0x100;
   if(t&0x1) { 
     state.flags |= FLAG_C;
   } else {
@@ -529,18 +526,18 @@ static void op55(void) {  // EOR zpg, X
 static void op56(void) {  // LSR zpg, X
   uint16_t a = addr_zpg_x();
   uint16_t t = mem_read(a);
-  t = (t<<1);
-  if(t&0x100) { 
+  if(t&0x1) { 
     state.flags |= FLAG_C;
   } else {
     state.flags &= ~FLAG_C;
   }
+  t = (t>>1);
   if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
   state.cycle += 5; 
-  trace("LSR zeropage %02X, X");
   mem_write(a,t);
+  trace("LSR zeropage %02X, X");
 }
 
 static void op58(void) {  // CLI
@@ -594,7 +591,7 @@ static void op66(void) {  // ROR zpg
     state.flags &= ~FLAG_C;
   }
   t = t>>1;
-  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if((t&&0xFF) == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   mem_write(a,t);
   state.cycle += 5; 
@@ -698,7 +695,7 @@ static void op76(void) {  // ROR zpg, X
     state.flags &= ~FLAG_C;
   }
   t = t>>1;
-  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if((t&0xFF) == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   mem_write(a,t);
   state.cycle += 5; 
@@ -749,7 +746,7 @@ static void op86(void) {  // STX zpg
 }
 
 static void op88(void) {  // DEY
-  state.y     -= 1;
+  state.y--;
   if((state.y) == 0)   state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if((state.y) & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 2; 
@@ -820,6 +817,8 @@ static void op96(void) {  // STX zpg, Y
 
 static void op98(void) {  // TYA
   state.a = state.y;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 2; 
   trace("TYA");
 }
@@ -894,6 +893,8 @@ static void opA6(void) {  // LDX zeropage
 
 static void opA8(void) {  // TAY
   state.y      = state.a;
+  if(state.y == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.y &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 2; 
   trace("TAY");
 }
