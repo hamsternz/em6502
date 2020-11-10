@@ -19,6 +19,7 @@ static uint8_t colour[1024];
 static uint8_t mem_read(uint16_t addr);
 static uint8_t mem_fetch(uint16_t addr);
 static void mem_write(uint16_t addr, uint8_t data);
+static void zeropage_dump(void);
 /************************************
 * CPU state
 ************************************/
@@ -112,21 +113,21 @@ static uint8_t addr_zpg_x(void) {
   uint8_t  rtn = mem_fetch(state.pc);
   trace_num = rtn;
   rtn += state.x;
-  return rtn;
+  return rtn & 0xFF;
 }
 
 static uint8_t addr_zpg_y(void) {
   uint8_t  rtn = mem_fetch(state.pc);
   trace_num = rtn;
   rtn += state.y;
-  return rtn;
+  return rtn & 0xFF;
 }
 
 static uint8_t addr_zpg_x_ind(void) {
   uint8_t  z = mem_fetch(state.pc);
   trace_num = z;
   z += state.x;
-  return mem_read(z+state.x) | (mem_read(z+state.x+1)<<8);
+  return mem_read(z) | (mem_read((z+1)&0xFF)<<8);
 }
 
 /******************************************************************************/
@@ -310,7 +311,7 @@ static void op26(void) {  // ROL zpg
   } else {
     state.flags &= ~FLAG_C;
   }
-  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if((t&0xFF) == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
   state.cycle += 5; 
@@ -344,9 +345,9 @@ static void op2A(void) {  // ROL A
   } else {
     state.flags &= ~FLAG_C;
   }
-  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
-  if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.a = t;
+  if(state.a == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if(state.a & 0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   state.cycle += 2; 
   trace("ROL A");
 }
@@ -399,7 +400,7 @@ static void op36(void) {  // ROL zpg, X
   } else {
     state.flags &= ~FLAG_C;
   }
-  if(t == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
+  if((t&0xFF) == 0)  state.flags |= FLAG_Z;  else state.flags &= ~FLAG_Z;
   if(t &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
 
   state.cycle += 5; 
@@ -1153,7 +1154,7 @@ static void opE0(void) {  // CPX #
   trace("CPX #%02X");
 }
 
-static void opE1(void) {  // SBC zpg, X
+static void opE1(void) {  // SBC (zpg, X)
   uint16_t t = state.a;
   t += mem_read(addr_zpg_x_ind()) ^ 0xFF;  // TODO - check Carry flags
   t += (state.flags & FLAG_C ? 1 : 0);
@@ -1163,7 +1164,7 @@ static void opE1(void) {  // SBC zpg, X
   if(state.a &0x80) state.flags |= FLAG_N;  else state.flags &= ~FLAG_N;
   if(t &0x100)      state.flags |= FLAG_C;  else state.flags &= ~FLAG_C;
   state.cycle += 4;   // TODO Decimal mode
-  trace("SBC zeropage %02X, X");
+  trace("SBC (zeropage %02X, X)");
 }
 
 static void opE4(void) {  // CPX zpg
@@ -1638,12 +1639,13 @@ void show_display(void) {
 }
 
 static void print_dispatched(void) {
-  printf("  0123456789ABCDEF\n");
+  printf("  0 1 2 3 4 5 6 7 8 9 A B C D E F\n");
   for(int i = 0; i <256; i++) {
     if((i&0xf)==0) {
-       printf("%1x ",i>>4);
+       printf("%1x",i>>4);
     }
-    putchar(dispatched[i] ^ dispatched1[i] ? '1' : '0');
+    putchar(' ');
+    putchar(dispatched[i] ^ dispatched1[i] ? 'X' : '-');
     if((i&0xf) == 0xF)
       putchar('\n');
   }
@@ -1652,14 +1654,15 @@ static void print_dispatched(void) {
 
 static int cpu_run(void) {
    uint8_t inst;
-   if(state.pc == 0xE41C) {
-      memcpy(dispatched1, dispatched, 256);
+
+   if(state.pc == 0xDDCD) {
+      memset(dispatched, 0, 256);
       trace_level = TRACE_OP;
-   } else if(state.pc == 0xDEA5) {
+   } else if(state.pc == 0xDDDA) {
       print_dispatched();
       trace_level = TRACE_OFF;
       sleep(1);
-   }
+   } 
    trace_addr   = state.pc; 
    trace_fetch_len    = 0;
    inst         = mem_fetch(state.pc);
@@ -1729,10 +1732,8 @@ static int rom3_load() {
    return 1;
 }
 
-static void sighandler_usr1(int v) {
+static void zeropage_dump(void) {
    int i;
-   cpu_dump();
-
    printf("   ");
    for(i = 0; i < 16; i++) {
      printf(" %02X",i);
@@ -1745,6 +1746,11 @@ static void sighandler_usr1(int v) {
      printf(" %02X",ram[i]);
    }
    printf("\n");
+}
+
+static void sighandler_usr1(int v) {
+   cpu_dump();
+   zeropage_dump();
 }
 
 int main(int argc, char *argv[]) {
